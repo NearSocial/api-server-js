@@ -9,16 +9,20 @@
     "binary-search-bounds": "^2.0.5",
     "koa": "^2.13.0",
     "koa-bodyparser": "^4.3.0",
+    "koa-logger": "^3.2.1",
     "koa-router": "^10.1.0",
     "pg": "^8.7.0",
     "ws": "^8.5.0"
   },
   "scripts": {
     "start": "node app",
-    "dev": "nodemon -r dotenv/config app"
+    "dev": "nodemon -r dotenv/config app",
+    "snapshot": "node snapshot"
   },
   "devDependencies": {
     "dotenv": "^8.2.0",
+    "near-api-js": "^0.45.0",
+    "node-fetch": "^2.6.1",
     "nodemon": "^2.0.6",
     "prettier": "^2.2.1"
   }

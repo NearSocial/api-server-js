@@ -10,6 +10,8 @@ app.proxy = true;
 const Router = require("koa-router");
 const router = new Router();
 
+const logger = require("koa-logger");
+
 const bodyParser = require("koa-bodyparser");
 
 const Receipts = require("./receipts");
@@ -19,6 +21,7 @@ const WebSocket = require("ws");
 const { values } = require("pg/lib/native/query");
 
 const StateFilename = "res/state.json";
+const SnapshotFilename = "res/snapshot.json";
 const SubsFilename = "res/subs.json";
 const WsSubsFilename = "res/ws_subs.json";
 
@@ -29,6 +32,11 @@ const isObject = function (o) {
 const isString = (s) => typeof s === "string";
 
 const KeyBlockHeight = ":block";
+
+const KeysReturnType = {
+  True: "True",
+  BlockHeight: "BlockHeight",
+};
 
 function saveJson(json, filename) {
   try {
@@ -56,36 +64,43 @@ const PostTimeout = 1000;
 const recursiveSet = (obj, newObj, b) => {
   Object.entries(newObj).forEach(([key, newValue]) => {
     const values = obj?.[key] || [];
-    const lastValue = values.length > 0 ? values[values.length - 1] : null;
-    const v = lastValue?.v;
-    if (isObject(newValue)) {
-      if (isObject(v)) {
-        recursiveSet(v, newValue, b);
-      } else {
-        const value = {
-          v: isString(v) ? { "": [lastValue] } : {},
-          b,
-        };
-        recursiveSet(value.v, newValue, b);
-        values.push(value);
-        obj[key] = values;
-      }
-    } else if (isString(newValue)) {
-      if (isObject(v)) {
-        v[""] = v[""] || [];
-        v[""].push({
-          v: newValue,
+    const v = values.length > 0 ? values[values.length - 1] : null;
+    const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
+    // Is the last value a node/object
+    if (o) {
+      values.push({
+        i: v?.i ?? values.length - 1,
+        b,
+      });
+      if (isObject(newValue)) {
+        recursiveSet(o, newValue, b);
+      } else if (isString(newValue)) {
+        o[""] = o[""] || [];
+        o[""].push({
+          s: newValue,
           b,
         });
       } else {
-        values.push({
-          v: newValue,
-          b,
-        });
-        obj[key] = values;
+        throw new Error("newValue is not object not string");
       }
     } else {
-      throw new Error("newValue is not object not string");
+      if (isObject(newValue)) {
+        const value = {
+          o: isString(v?.s) ? { "": [v] } : {},
+          b,
+        };
+        recursiveSet(value.o, newValue, b);
+        values.push(value);
+        obj[key] = values;
+      } else if (isString(newValue)) {
+        values.push({
+          s: newValue,
+          b,
+        });
+        obj[key] = values;
+      } else {
+        throw new Error("newValue is not object not string");
+      }
     }
   });
 };
@@ -128,17 +143,26 @@ const jsonSetKey = (res, key, newValue, withBlockHeight) => {
   if (isObject(value)) {
     value[""] = withBlockHeight
       ? {
-          "": newValue.v,
+          "": newValue.s,
           [KeyBlockHeight]: newValue.b,
         }
-      : newValue.v;
+      : newValue.s;
   } else {
     res[key] = withBlockHeight
       ? {
-          "": newValue.v,
+          "": newValue.s,
           [KeyBlockHeight]: newValue.b,
         }
-      : newValue.v;
+      : newValue.s;
+  }
+};
+
+const jsonMapSetValue = (res, key, newValue) => {
+  const value = res[key];
+  if (isObject(value)) {
+    value[""] = newValue;
+  } else {
+    res[key] = newValue;
   }
 };
 
@@ -155,7 +179,7 @@ const jsonGetInnerObject = (res, key) => {
   }
 };
 
-const recursiveGet = (res, obj, keys, b, o) => {
+const recursiveGet = (res, obj, objBlock, keys, b, options) => {
   const matchKey = keys[0];
   let isRecursiveMatch = matchKey === "**";
   if (isRecursiveMatch && keys.length > 1) {
@@ -167,37 +191,68 @@ const recursiveGet = (res, obj, keys, b, o) => {
       : matchKey in obj
       ? [[matchKey, obj[matchKey]]]
       : [];
-  // if (o.withBlockHeight) {
-  //    res.insert(KEY_BLOCK_HEIGHT.to_string(), node.block_height.into());
-  // }
+  if (options.withBlockHeight) {
+    res[KeyBlockHeight] = objBlock;
+  }
   entries.forEach(([key, values]) => {
-    const value = findValueAtBlockHeight(values, b);
-    if (!value) {
+    const v = findValueAtBlockHeight(values, b);
+    if (!v) {
       return;
     }
-    const v = value?.v;
-    if (isObject(v)) {
+    const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
+    if (o) {
       if (keys.length > 1 || isRecursiveMatch) {
         // Going deeper
         const innerMap = jsonGetInnerObject(res, key);
         if (keys.length > 1) {
-          recursiveGet(innerMap, v, keys.slice(1), b, o);
+          recursiveGet(innerMap, o, v.b, keys.slice(1), b, options);
         }
         if (isRecursiveMatch) {
           // Non skipping step in.
-          recursiveGet(innerMap, v, keys, b, o);
+          recursiveGet(innerMap, o, v.b, keys, b, options);
         }
       } else {
         const innerValue = findValueAtBlockHeight(v[""] || [], b);
-        if (isString(innerValue?.v)) {
-          jsonSetKey(res, key, innerValue, o.withBlockHeight);
+        if (isString(innerValue?.s)) {
+          jsonSetKey(res, key, innerValue, options.withBlockHeight);
         } else {
           // mismatch skipping
         }
       }
-    } else if (isString(v)) {
+    } else if (isString(v?.s)) {
       if (keys.length === 1) {
-        jsonSetKey(res, key, value, o.withBlockHeight);
+        jsonSetKey(res, key, v, options.withBlockHeight);
+      }
+    }
+  });
+};
+
+const recursiveKeys = (res, obj, keys, b, options) => {
+  const matchKey = keys[0];
+  const entries =
+    matchKey === "*"
+      ? Object.entries(obj)
+      : matchKey in obj
+      ? [[matchKey, obj[matchKey]]]
+      : [];
+  entries.forEach(([key, values]) => {
+    const v = findValueAtBlockHeight(values, b);
+    if (!v) {
+      return;
+    }
+    const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
+    const newValue =
+      options.returnType === KeysReturnType.BlockHeight ? v.b : true;
+    if (o) {
+      if (keys.length === 1) {
+        jsonMapSetValue(res, key, newValue);
+      } else {
+        const innerMap = jsonGetInnerObject(res, key);
+        recursiveKeys(innerMap, o, keys.slice(1), b, options);
+      }
+    } else if (isString(v?.s)) {
+      if (keys.length === 1) {
+        jsonMapSetValue(res, key, newValue);
       }
     }
   });
@@ -221,9 +276,11 @@ const recursiveCleanup = (o) => {
 };
 
 (async () => {
-  const state = loadJson(StateFilename, true) || {
-    data: {},
-  };
+  const state = loadJson(StateFilename, true) ||
+    loadJson(SnapshotFilename, true) || {
+      data: {},
+    };
+  state.blockTimes = state.blockTimes || {};
 
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
 
@@ -235,6 +292,9 @@ const recursiveCleanup = (o) => {
     let blockHeight = 0;
     receipts.forEach((receipt) => {
       let receiptBlockHeight = parseInt(receipt.block_height);
+      state.blockTimes[receiptBlockHeight] = Math.round(
+        parseFloat(receipt.block_timestamp) / 1e6
+      );
       if (receiptBlockHeight > blockHeight) {
         if (blockHeight) {
           recursiveSet(state.data, aggregatedData, blockHeight);
@@ -261,7 +321,9 @@ const recursiveCleanup = (o) => {
 
   const fetchAndApply = async () => {
     const newReceipts = await fetchAllReceipts();
-    console.log(`Fetched ${newReceipts.length} receipts.`);
+    if (newReceipts.length) {
+      console.log(`Fetched ${newReceipts.length} receipts.`);
+    }
     applyReceipts(newReceipts);
     state.lastReceipt = receiptFetcher.lastReceipt;
   };
@@ -272,7 +334,7 @@ const recursiveCleanup = (o) => {
   const scheduleUpdate = (delay) =>
     setTimeout(async () => {
       await fetchAndApply();
-      scheduleUpdate(1000);
+      scheduleUpdate(250);
     }, delay);
 
   const stateGet = (keys, b, o) => {
@@ -289,15 +351,47 @@ const recursiveCleanup = (o) => {
       if (path.length === 0) {
         throw new Error("key is empty");
       }
-      recursiveGet(res, state.data, path, b, {
+      recursiveGet(res, state.data, b, path, b, {
         withBlockHeight: o?.with_block_height,
       });
     });
     return recursiveCleanup(res) || {};
   };
 
-  console.log(JSON.stringify(stateGet(["**"], 75942520), undefined, 2));
-  return;
+  const stateKeys = (keys, b, o) => {
+    if (!Array.isArray(keys)) {
+      throw new Error("keys is not an array");
+    }
+    b = b !== null && b !== undefined ? parseInt(b) : undefined;
+    const res = {};
+    keys.forEach((key) => {
+      if (!isString(key)) {
+        throw new Error("key is not a string");
+      }
+      const path = key.split("/");
+      if (path.length === 0) {
+        throw new Error("key is empty");
+      }
+      recursiveKeys(res, state.data, path, b, {
+        returnType:
+          o?.return_type === KeysReturnType.BlockHeight
+            ? KeysReturnType.BlockHeight
+            : KeysReturnType.True,
+      });
+    });
+    return recursiveCleanup(res) || {};
+  };
+
+  // console.log(
+  //   JSON.stringify(
+  //     stateKeys(["*/post/meme"], undefined, {
+  //       return_type: KeysReturnType.BlockHeight,
+  //     }),
+  //     undefined,
+  //     2
+  //   )
+  // );
+  // return;
 
   //
   // const subs = loadJson(SubsFilename, true) || {};
@@ -459,8 +553,25 @@ const recursiveCleanup = (o) => {
       const options = body.options;
       ctx.body = JSON.stringify(stateGet(keys, blockHeight, options));
     } catch (e) {
-      ctx.status = 500;
-      ctx.body = `err: ${e}`;
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.post("/keys", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.body;
+      const keys = body.keys;
+      if (!keys) {
+        throw new Error(`Missing keys`);
+      }
+      const blockHeight = body.blockHeight;
+      const options = body.options;
+      ctx.body = JSON.stringify(stateKeys(keys, blockHeight, options));
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
     }
   });
 
@@ -519,10 +630,7 @@ const recursiveCleanup = (o) => {
   // });
 
   app
-    .use(async (ctx, next) => {
-      console.log(ctx.method, ctx.path);
-      await next();
-    })
+    .use(logger())
     .use(cors())
     .use(bodyParser())
     .use(router.routes())
