@@ -18,7 +18,7 @@ const Receipts = require("./receipts");
 const axios = require("axios");
 
 const WebSocket = require("ws");
-const { values } = require("pg/lib/native/query");
+const { options } = require("pg/lib/defaults");
 
 const StateFilename = "res/state.json";
 const SnapshotFilename = "res/snapshot.json";
@@ -32,10 +32,12 @@ const isObject = function (o) {
 const isString = (s) => typeof s === "string";
 
 const KeyBlockHeight = ":block";
+const KeyTimestamp = ":timestamp";
 
 const KeysReturnType = {
   True: "True",
   BlockHeight: "BlockHeight",
+  History: "History",
 };
 
 function saveJson(json, filename) {
@@ -60,6 +62,8 @@ function loadJson(filename, ignore) {
 }
 
 const PostTimeout = 1000;
+
+let blockTimestamps = {};
 
 const recursiveSet = (obj, newObj, b) => {
   Object.entries(newObj).forEach(([key, newValue]) => {
@@ -138,22 +142,36 @@ const findValueAtBlockHeight = (values, b) =>
     ? values[values.length - 1]
     : undefined;
 
-const jsonSetKey = (res, key, newValue, withBlockHeight) => {
+const extractBlockHistory = (values, b) =>
+  values
+    .slice(
+      0,
+      b !== undefined ? bounds.le(values, { b }, valueCmp) + 1 : values.length
+    )
+    .map((v) => v.b);
+
+const addOptions = (v, b, options) => {
+  if (options.withBlockHeight) {
+    v[KeyBlockHeight] = b;
+  }
+  if (options.withTimestamp) {
+    v[KeyTimestamp] = blockTimestamps[b];
+  }
+};
+
+const jsonSetKey = (res, key, newValue, options) => {
   const value = res[key];
+  let v = newValue.s;
+  if (options.withBlockHeight || options.withTimestamp) {
+    v = {
+      "": v,
+    };
+  }
+  addOptions(v, newValue.b, options);
   if (isObject(value)) {
-    value[""] = withBlockHeight
-      ? {
-          "": newValue.s,
-          [KeyBlockHeight]: newValue.b,
-        }
-      : newValue.s;
+    value[""] = v;
   } else {
-    res[key] = withBlockHeight
-      ? {
-          "": newValue.s,
-          [KeyBlockHeight]: newValue.b,
-        }
-      : newValue.s;
+    res[key] = v;
   }
 };
 
@@ -191,9 +209,8 @@ const recursiveGet = (res, obj, objBlock, keys, b, options) => {
       : matchKey in obj
       ? [[matchKey, obj[matchKey]]]
       : [];
-  if (options.withBlockHeight) {
-    res[KeyBlockHeight] = objBlock;
-  }
+
+  addOptions(res, objBlock, options);
   entries.forEach(([key, values]) => {
     const v = findValueAtBlockHeight(values, b);
     if (!v) {
@@ -214,14 +231,14 @@ const recursiveGet = (res, obj, objBlock, keys, b, options) => {
       } else {
         const innerValue = findValueAtBlockHeight(v[""] || [], b);
         if (isString(innerValue?.s)) {
-          jsonSetKey(res, key, innerValue, options.withBlockHeight);
+          jsonSetKey(res, key, innerValue, options);
         } else {
           // mismatch skipping
         }
       }
     } else if (isString(v?.s)) {
       if (keys.length === 1) {
-        jsonSetKey(res, key, v, options.withBlockHeight);
+        jsonSetKey(res, key, v, options);
       }
     }
   });
@@ -241,19 +258,19 @@ const recursiveKeys = (res, obj, keys, b, options) => {
       return;
     }
     const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
-    const newValue =
-      options.returnType === KeysReturnType.BlockHeight ? v.b : true;
-    if (o) {
-      if (keys.length === 1) {
-        jsonMapSetValue(res, key, newValue);
-      } else {
-        const innerMap = jsonGetInnerObject(res, key);
-        recursiveKeys(innerMap, o, keys.slice(1), b, options);
-      }
-    } else if (isString(v?.s)) {
-      if (keys.length === 1) {
+    if (keys.length === 1) {
+      if (o || isString(v?.s)) {
+        const newValue =
+          options.returnType === KeysReturnType.History
+            ? extractBlockHistory(values, b)
+            : options.returnType === KeysReturnType.BlockHeight
+            ? v.b
+            : true;
         jsonMapSetValue(res, key, newValue);
       }
+    } else if (o) {
+      const innerMap = jsonGetInnerObject(res, key);
+      recursiveKeys(innerMap, o, keys.slice(1), b, options);
     }
   });
 };
@@ -280,7 +297,7 @@ const recursiveCleanup = (o) => {
     loadJson(SnapshotFilename, true) || {
       data: {},
     };
-  state.blockTimes = state.blockTimes || {};
+  blockTimestamps = state.blockTimes = state.blockTimes || {};
 
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
 
@@ -352,7 +369,8 @@ const recursiveCleanup = (o) => {
         throw new Error("key is empty");
       }
       recursiveGet(res, state.data, b, path, b, {
-        withBlockHeight: o?.with_block_height,
+        withBlockHeight: o?.with_block_height || o?.withBlockHeight,
+        withTimestamp: o?.with_timestamp || o?.withTimestamp,
       });
     });
     return recursiveCleanup(res) || {};
@@ -374,8 +392,8 @@ const recursiveCleanup = (o) => {
       }
       recursiveKeys(res, state.data, path, b, {
         returnType:
-          o?.return_type === KeysReturnType.BlockHeight
-            ? KeysReturnType.BlockHeight
+          o?.return_type in KeysReturnType
+            ? o.return_type
             : KeysReturnType.True,
       });
     });
