@@ -569,6 +569,7 @@ const recursiveCleanup = (o) => {
       }
       const blockHeight = body.blockHeight;
       const options = body.options;
+      console.log("/get", keys, blockHeight, options);
       ctx.body = JSON.stringify(stateGet(keys, blockHeight, options));
     } catch (e) {
       ctx.status = 400;
@@ -586,6 +587,7 @@ const recursiveCleanup = (o) => {
       }
       const blockHeight = body.blockHeight;
       const options = body.options;
+      console.log("/keys", keys, blockHeight, options);
       ctx.body = JSON.stringify(stateKeys(keys, blockHeight, options));
     } catch (e) {
       ctx.status = 400;
