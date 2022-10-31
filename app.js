@@ -62,7 +62,7 @@ function loadJson(filename, ignore) {
 }
 
 const PostTimeout = 1000;
-
+const ErrorUnknownType = "newValue is not object, null or string";
 let blockTimestamps = {};
 
 const recursiveSet = (obj, newObj, b) => {
@@ -78,32 +78,32 @@ const recursiveSet = (obj, newObj, b) => {
       });
       if (isObject(newValue)) {
         recursiveSet(o, newValue, b);
-      } else if (isString(newValue)) {
+      } else if (isString(newValue) || newValue === null) {
         o[""] = o[""] || [];
         o[""].push({
           s: newValue,
           b,
         });
       } else {
-        throw new Error("newValue is not object not string");
+        throw new Error(ErrorUnknownType);
       }
     } else {
       if (isObject(newValue)) {
         const value = {
-          o: isString(v?.s) ? { "": [v] } : {},
+          o: v?.s !== undefined ? { "": [v] } : {},
           b,
         };
         recursiveSet(value.o, newValue, b);
         values.push(value);
         obj[key] = values;
-      } else if (isString(newValue)) {
+      } else if (isString(newValue) || newValue === null) {
         values.push({
           s: newValue,
           b,
         });
         obj[key] = values;
       } else {
-        throw new Error("newValue is not object not string");
+        throw new Error(ErrorUnknownType);
       }
     }
   });
@@ -115,18 +115,18 @@ const mergeData = (obj, newObj) => {
     if (isObject(value)) {
       if (isObject(newValue)) {
         mergeData(value, newValue);
-      } else if (isString(newValue)) {
+      } else if (isString(newValue) || newValue === null) {
         value[""] = newValue;
       } else {
-        throw new Error("newValue is not object not string");
+        throw new Error(ErrorUnknownType);
       }
-    } else if (isString(value)) {
+    } else if (isString(value) || value === null) {
       if (isObject(newValue)) {
         obj[key] = Object.assign({ "": value }, newValue);
-      } else if (isString(newValue)) {
+      } else if (isString(newValue) || newValue === null) {
         obj[key] = newValue;
       } else {
-        throw new Error("newValue is not object not string");
+        throw new Error(ErrorUnknownType);
       }
     } else {
       obj[key] = newValue;
@@ -163,11 +163,17 @@ const jsonSetKey = (res, key, newValue, options) => {
   const value = res[key];
   let v = newValue.s;
   if (options.withBlockHeight || options.withTimestamp) {
-    v = {
-      "": v,
-    };
+    if (isString(v) || (options.returnDeleted && v === null)) {
+      v = {
+        "": v,
+      };
+    } else {
+      v = {};
+    }
+    addOptions(v, newValue.b, options);
+  } else if (!options.returnDeleted && v === null) {
+    return;
   }
-  addOptions(v, newValue.b, options);
   if (isObject(value)) {
     value[""] = v;
   } else {
@@ -188,7 +194,7 @@ const jsonGetInnerObject = (res, key) => {
   const value = res[key];
   if (isObject(value)) {
     return value;
-  } else if (isString(value)) {
+  } else if (isString(value) || value === null) {
     return (res[key] = {
       "": value,
     });
@@ -230,13 +236,13 @@ const recursiveGet = (res, obj, objBlock, keys, b, options) => {
         }
       } else {
         const innerValue = findValueAtBlockHeight(v[""] || [], b);
-        if (isString(innerValue?.s)) {
+        if (innerValue?.s !== undefined) {
           jsonSetKey(res, key, innerValue, options);
         } else {
           // mismatch skipping
         }
       }
-    } else if (isString(v?.s)) {
+    } else if (v?.s !== undefined) {
       if (keys.length === 1) {
         jsonSetKey(res, key, v, options);
       }
@@ -259,7 +265,7 @@ const recursiveKeys = (res, obj, keys, b, options) => {
     }
     const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
     if (keys.length === 1) {
-      if (o || isString(v?.s)) {
+      if (o || isString(v?.s) || (options.returnDeleted && v?.s === null)) {
         const newValue =
           options.returnType === KeysReturnType.History
             ? extractBlockHistory(values, b)
@@ -371,6 +377,7 @@ const recursiveCleanup = (o) => {
       recursiveGet(res, state.data, b, path, b, {
         withBlockHeight: o?.with_block_height || o?.withBlockHeight,
         withTimestamp: o?.with_timestamp || o?.withTimestamp,
+        returnDeleted: o?.return_deleted || o?.returnDeleted,
       });
     });
     return recursiveCleanup(res) || {};
@@ -395,6 +402,7 @@ const recursiveCleanup = (o) => {
           o?.return_type in KeysReturnType
             ? o.return_type
             : KeysReturnType.True,
+        returnDeleted: o?.return_deleted || o?.returnDeleted,
       });
     });
     return recursiveCleanup(res) || {};
