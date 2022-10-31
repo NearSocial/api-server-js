@@ -171,6 +171,8 @@ const jsonSetKey = (res, key, newValue, options) => {
       v = {};
     }
     addOptions(v, newValue.b, options);
+  } else if (!options.returnDeleted && v === null) {
+    return;
   }
   if (isObject(value)) {
     value[""] = v;
