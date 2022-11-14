@@ -235,7 +235,7 @@ const recursiveGet = (res, obj, objBlock, keys, b, options) => {
           recursiveGet(innerMap, o, v.b, keys, b, options);
         }
       } else {
-        const innerValue = findValueAtBlockHeight(v[""] || [], b);
+        const innerValue = findValueAtBlockHeight(o[""] || [], b);
         if (innerValue?.s !== undefined) {
           jsonSetKey(res, key, innerValue, options);
         } else {
@@ -266,13 +266,28 @@ const recursiveKeys = (res, obj, keys, b, options) => {
     const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
     if (keys.length === 1) {
       if (o || isString(v?.s) || (options.returnDeleted && v?.s === null)) {
-        const newValue =
-          options.returnType === KeysReturnType.History
-            ? extractBlockHistory(values, b)
-            : options.returnType === KeysReturnType.BlockHeight
-            ? v.b
-            : true;
-        jsonMapSetValue(res, key, newValue);
+        if (o && options.valuesOnly) {
+          const innerValue = findValueAtBlockHeight(o[""] || [], b);
+          if (isString(innerValue?.s) || (options.returnDeleted && innerValue?.s === null)) {
+            const newValue =
+              options.returnType === KeysReturnType.History
+                ? extractBlockHistory(o[""], b)
+                : options.returnType === KeysReturnType.BlockHeight
+                  ? innerValue.b
+                  : true;
+            jsonMapSetValue(res, key, newValue);
+          } else {
+            // mismatch skipping
+          }
+        } else {
+          const newValue =
+            options.returnType === KeysReturnType.History
+              ? extractBlockHistory(values, b)
+              : options.returnType === KeysReturnType.BlockHeight
+                ? v.b
+                : true;
+          jsonMapSetValue(res, key, newValue);
+        }
       }
     } else if (o) {
       const innerMap = jsonGetInnerObject(res, key);
@@ -360,6 +375,23 @@ const recursiveCleanup = (o) => {
       scheduleUpdate(250);
     }, delay);
 
+  const keyToPath = (key) => {
+    if (!isString(key)) {
+      throw new Error("key is not a string");
+    }
+    if (key.endsWith('//')) {
+      return null;
+    }
+    const path = key.split("/");
+    if (path?.[path.length - 1] === "") {
+      path.pop();
+    }
+    if (path.length === 0) {
+      throw new Error("key is empty");
+    }
+    return path;
+  }
+
   const stateGet = (keys, b, o) => {
     if (!Array.isArray(keys)) {
       throw new Error("keys is not an array");
@@ -367,17 +399,14 @@ const recursiveCleanup = (o) => {
     b = b !== null && b !== undefined ? parseInt(b) : undefined;
     const res = {};
     keys.forEach((key) => {
-      if (!isString(key)) {
-        throw new Error("key is not a string");
-      }
-      const path = key.split("/");
-      if (path.length === 0) {
-        throw new Error("key is empty");
+      const path = keyToPath(key);
+      if (path === null) {
+        return;
       }
       recursiveGet(res, state.data, b, path, b, {
-        withBlockHeight: o?.with_block_height || o?.withBlockHeight,
-        withTimestamp: o?.with_timestamp || o?.withTimestamp,
-        returnDeleted: o?.return_deleted || o?.returnDeleted,
+        withBlockHeight: o?.with_block_height ?? o?.withBlockHeight,
+        withTimestamp: o?.with_timestamp ?? o?.withTimestamp,
+        returnDeleted: o?.return_deleted ?? o?.returnDeleted,
       });
     });
     return recursiveCleanup(res) || {};
@@ -390,19 +419,17 @@ const recursiveCleanup = (o) => {
     b = b !== null && b !== undefined ? parseInt(b) : undefined;
     const res = {};
     keys.forEach((key) => {
-      if (!isString(key)) {
-        throw new Error("key is not a string");
-      }
-      const path = key.split("/");
-      if (path.length === 0) {
-        throw new Error("key is empty");
+      const path = keyToPath(key);
+      if (path === null) {
+        return;
       }
       recursiveKeys(res, state.data, path, b, {
         returnType:
           o?.return_type in KeysReturnType
             ? o.return_type
             : KeysReturnType.True,
-        returnDeleted: o?.return_deleted || o?.returnDeleted,
+        returnDeleted: o?.return_deleted ?? o?.returnDeleted,
+        valuesOnly: o?.values_only ?? o?.valuesOnly,
       });
     });
     return recursiveCleanup(res) || {};
