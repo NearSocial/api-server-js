@@ -315,8 +315,8 @@ const recursiveCleanup = (o) => {
 
 const indexValue = (indexObj, accountId, action, s, blockHeight) => {
   try {
-    const { key, data } = JSON.parse(s);
-    if (key === undefined || data === undefined) {
+    const { key, value } = JSON.parse(s);
+    if (key === undefined || value === undefined) {
       // Not a valid index.
       return;
     }
@@ -324,14 +324,14 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
       k: key,
       a: action
     });
-    const value = {
+    const indexValue = {
       a: accountId,
-      d: data,
+      v: value,
       b: blockHeight,
     }
     const values = indexObj[indexKey] || (indexObj[indexKey] = []);
-    values.push(value);
-    // console.log("Added index", key, value);
+    values.push(indexValue);
+    // console.log("Added index", indexKey, indexValue);
   } catch {
     // ignore failed indices.
   }
@@ -511,7 +511,7 @@ const buildIndex = (data, indexObj) => {
     return recursiveCleanup(res) || {};
   };
 
-  const stateIndex = (key, action, accounts, options) => {
+  const stateIndex = (key, action, accountId, options) => {
     const indexKey = JSON.stringify({
       k: key,
       a: action
@@ -520,14 +520,14 @@ const buildIndex = (data, indexObj) => {
     if (!values) {
       return [];
     }
-    accounts = isString(accounts) ? {[accounts] : true} : Array.isArray(accounts) ? accounts.reduce((acc, a) => {acc[a] = true; return acc;}, {}) : null;
+    const accounts = isString(accountId) ? {[accountId] : true} : Array.isArray(accountId) ? accounts.reduce((acc, a) => {acc[a] = true; return acc;}, {}) : null;
     if (accounts) {
       values = values.filter((v) => v.a in accounts);
     }
     return values.map((v) => ({
       accountId: v.a,
       blockHeight: v.b,
-      data: v.d,
+      value: v.v,
     }));
   };
 
@@ -737,10 +737,10 @@ const buildIndex = (data, indexObj) => {
       if (!key || !action) {
         throw new Error(`"key" and "action" are required`);
       }
-      const accounts = body.accounts;
+      const accountId = body.accountId;
       const options = body.options;
-      console.log("/index", key, action, accounts, options);
-      ctx.body = JSON.stringify(stateIndex(key, action, accounts, options));
+      console.log("/index", key, action, accountId, options);
+      ctx.body = JSON.stringify(stateIndex(key, action, accountId, options));
     } catch (e) {
       ctx.status = 400;
       ctx.body = `${e}`;
