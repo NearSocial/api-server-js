@@ -313,14 +313,90 @@ const recursiveCleanup = (o) => {
   return hasKeys ? o : null;
 };
 
+const indexValue = (indexObj, accountId, action, s, blockHeight) => {
+  try {
+    const { key, data } = JSON.parse(s);
+    if (key === undefined || data === undefined) {
+      // Not a valid index.
+      return;
+    }
+    const indexKey = JSON.stringify({
+      k: key,
+      a: action
+    });
+    const value = {
+      a: accountId,
+      d: data,
+      b: blockHeight,
+    }
+    const values = indexObj[indexKey] || (indexObj[indexKey] = []);
+    values.push(value);
+    // console.log("Added index", key, value);
+  } catch {
+    // ignore failed indices.
+  }
+};
+
+const buildIndex = (data, indexObj) => {
+  Object.entries(data).forEach(([accountId, accountValues]) => {
+    let v = findValueAtBlockHeight(accountValues);
+    let o = v?.o ?? (v?.i !== undefined ? accountValues[v.i].o : null);
+
+    const indexValues = o?.index;
+    if (!indexValues) {
+      return;
+    }
+    v = findValueAtBlockHeight(indexValues);
+    o = v?.o ?? (v?.i !== undefined ? indexValues[v.i].o : null);
+    if (!isObject(o)) {
+      return;
+    }
+    Object.entries(o).forEach(([action, values]) => {
+      values.forEach((v) => {
+        // Only need the first node, since there is no node deletion
+        if (v.o) {
+          const emptyKeyValues = o[""] || [];
+          emptyKeyValues.forEach((v) => {
+            if (v.s !== undefined) {
+              indexValue(indexObj, accountId, action, v.s, v.b);}
+            });
+        } else if (v.s !== undefined) {
+          indexValue(indexObj, accountId, action, v.s, v.b);
+        }
+      });
+    });
+  });
+};
+
 (async () => {
   const state = loadJson(StateFilename, true) ||
     loadJson(SnapshotFilename, true) || {
       data: {},
     };
   blockTimestamps = state.blockTimes = state.blockTimes || {};
+  const indexObj = {};
+  buildIndex(state.data, indexObj);
 
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
+
+  const addData = (data, blockHeight) => {
+    recursiveSet(state.data, data, blockHeight);
+    Object.entries(data).forEach(([accountId, account]) => {
+      const index = account?.index;
+      if (isObject(index)) {
+        Object.entries(index).forEach(([action, value]) => {
+          if (isString(value)) {
+            indexValue(indexObj, accountId, action, value, blockHeight);
+          } else if (isObject(value)) {
+            const emptyKeyValue = value[""];
+            if (isString(emptyKeyValue)) {
+              indexValue(indexObj, accountId, action, emptyKeyValue, blockHeight);
+            }
+          }
+        });
+      }
+    });
+  }
 
   const applyReceipts = (receipts) => {
     if (receipts.length === 0) {
@@ -335,14 +411,14 @@ const recursiveCleanup = (o) => {
       );
       if (receiptBlockHeight > blockHeight) {
         if (blockHeight) {
-          recursiveSet(state.data, aggregatedData, blockHeight);
+          addData(aggregatedData, blockHeight);
           aggregatedData = {};
         }
         blockHeight = receiptBlockHeight;
       }
       mergeData(aggregatedData, receipt.args.data);
     });
-    recursiveSet(state.data, aggregatedData, blockHeight);
+    addData(aggregatedData, blockHeight);
   };
 
   const fetchAllReceipts = async () => {
@@ -433,6 +509,26 @@ const recursiveCleanup = (o) => {
       });
     });
     return recursiveCleanup(res) || {};
+  };
+
+  const stateIndex = (key, action, accounts, options) => {
+    const indexKey = JSON.stringify({
+      k: key,
+      a: action
+    });
+    let values = indexObj[indexKey];
+    if (!values) {
+      return [];
+    }
+    accounts = isString(accounts) ? {[accounts] : true} : Array.isArray(accounts) ? accounts.reduce((acc, a) => {acc[a] = true; return acc;}, {}) : null;
+    if (accounts) {
+      values = values.filter((v) => v.a in accounts);
+    }
+    return values.map((v) => ({
+      accountId: v.a,
+      blockHeight: v.b,
+      data: v.d,
+    }));
   };
 
   // console.log(
@@ -587,6 +683,8 @@ const recursiveCleanup = (o) => {
   //   });
   // });
 
+
+
   scheduleUpdate(1);
 
   // Save state once a minute
@@ -624,6 +722,25 @@ const recursiveCleanup = (o) => {
       const options = body.options;
       console.log("/keys", keys, blockHeight, options);
       ctx.body = JSON.stringify(stateKeys(keys, blockHeight, options));
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.post("/index", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.body;
+      const key = body.key;
+      const action = body.action;
+      if (!key || !action) {
+        throw new Error(`"key" and "action" are required`);
+      }
+      const accounts = body.accounts;
+      const options = body.options;
+      console.log("/index", key, action, accounts, options);
+      ctx.body = JSON.stringify(stateIndex(key, action, accounts, options));
     } catch (e) {
       ctx.status = 400;
       ctx.body = `${e}`;
