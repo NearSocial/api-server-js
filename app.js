@@ -511,7 +511,7 @@ const buildIndex = (data, indexObj) => {
     return recursiveCleanup(res) || {};
   };
 
-  const stateIndex = (key, action, accountId, options) => {
+  const stateIndex = (key, action, options) => {
     const indexKey = JSON.stringify({
       k: key,
       a: action
@@ -520,7 +520,8 @@ const buildIndex = (data, indexObj) => {
     if (!values) {
       return [];
     }
-    const accounts = isString(accountId) ? {[accountId] : true} : Array.isArray(accountId) ? accounts.reduce((acc, a) => {acc[a] = true; return acc;}, {}) : null;
+    const accountId = options.accountId;
+    const accounts = isString(accountId) ? {[accountId] : true} : Array.isArray(accountId) ? accountId.reduce((acc, a) => {acc[a] = true; return acc;}, {}) : null;
     if (accounts) {
       values = values.filter((v) => v.a in accounts);
     }
@@ -737,10 +738,15 @@ const buildIndex = (data, indexObj) => {
       if (!key || !action) {
         throw new Error(`"key" and "action" are required`);
       }
-      const accountId = body.accountId;
-      const options = body.options;
-      console.log("/index", key, action, accountId, options);
-      ctx.body = JSON.stringify(stateIndex(key, action, accountId, options));
+      const options = body.options || {};
+      if (!isObject(options)) {
+        throw new Error(`"options" is not an object`);
+      }
+      if (body.accountId) {
+        options.accountId = options.accountId ?? body.accountId;
+      }
+      console.log("/index", key, action, options);
+      ctx.body = JSON.stringify(stateIndex(key, action, options));
     } catch (e) {
       ctx.status = 400;
       ctx.body = `${e}`;
