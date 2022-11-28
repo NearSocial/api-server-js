@@ -322,8 +322,18 @@ const recursiveCleanup = (o) => {
 };
 
 const indexValue = (indexObj, accountId, action, s, blockHeight) => {
+  let objs;
   try {
-    const { key, value } = JSON.parse(s);
+    const parsed = JSON.parse(s);
+    objs = Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    // ignore failed indices.
+    return;
+  }
+
+  objs.forEach(({key, value}) => {
+    try {
+
     if (key === undefined || value === undefined) {
       // Not a valid index.
       return;
@@ -343,6 +353,7 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
   } catch {
     // ignore failed indices.
   }
+  });
 };
 
 const buildIndex = (data, indexObj) => {
