@@ -34,6 +34,11 @@ const isString = (s) => typeof s === "string";
 const KeyBlockHeight = ":block";
 const KeyTimestamp = ":timestamp";
 
+const Order = {
+  desc: "desc",
+  asc: "asc",
+};
+
 const KeysReturnType = {
   True: "True",
   BlockHeight: "BlockHeight",
@@ -268,13 +273,16 @@ const recursiveKeys = (res, obj, keys, b, options) => {
       if (o || isString(v?.s) || (options.returnDeleted && v?.s === null)) {
         if (o && options.valuesOnly) {
           const innerValue = findValueAtBlockHeight(o[""] || [], b);
-          if (isString(innerValue?.s) || (options.returnDeleted && innerValue?.s === null)) {
+          if (
+            isString(innerValue?.s) ||
+            (options.returnDeleted && innerValue?.s === null)
+          ) {
             const newValue =
               options.returnType === KeysReturnType.History
                 ? extractBlockHistory(o[""], b)
                 : options.returnType === KeysReturnType.BlockHeight
-                  ? innerValue.b
-                  : true;
+                ? innerValue.b
+                : true;
             jsonMapSetValue(res, key, newValue);
           } else {
             // mismatch skipping
@@ -284,8 +292,8 @@ const recursiveKeys = (res, obj, keys, b, options) => {
             options.returnType === KeysReturnType.History
               ? extractBlockHistory(values, b)
               : options.returnType === KeysReturnType.BlockHeight
-                ? v.b
-                : true;
+              ? v.b
+              : true;
           jsonMapSetValue(res, key, newValue);
         }
       }
@@ -332,13 +340,13 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
     }
     const indexKey = JSON.stringify({
       k: key,
-      a: action
+      a: action,
     });
     const indexValue = {
       a: accountId,
       v: value,
       b: blockHeight,
-    }
+    };
     const values = indexObj[indexKey] || (indexObj[indexKey] = []);
     values.push(indexValue);
     // console.log("Added index", indexKey, indexValue);
@@ -369,8 +377,9 @@ const buildIndex = (data, indexObj) => {
           const emptyKeyValues = o[""] || [];
           emptyKeyValues.forEach((v) => {
             if (v.s !== undefined) {
-              indexValue(indexObj, accountId, action, v.s, v.b);}
-            });
+              indexValue(indexObj, accountId, action, v.s, v.b);
+            }
+          });
         } else if (v.s !== undefined) {
           indexValue(indexObj, accountId, action, v.s, v.b);
         }
@@ -401,13 +410,19 @@ const buildIndex = (data, indexObj) => {
           } else if (isObject(value)) {
             const emptyKeyValue = value[""];
             if (isString(emptyKeyValue)) {
-              indexValue(indexObj, accountId, action, emptyKeyValue, blockHeight);
+              indexValue(
+                indexObj,
+                accountId,
+                action,
+                emptyKeyValue,
+                blockHeight
+              );
             }
           }
         });
       }
     });
-  }
+  };
 
   const applyReceipts = (receipts) => {
     if (receipts.length === 0) {
@@ -466,7 +481,7 @@ const buildIndex = (data, indexObj) => {
     if (!isString(key)) {
       throw new Error("key is not a string");
     }
-    if (key.endsWith('//')) {
+    if (key.endsWith("//")) {
       return null;
     }
     const path = key.split("/");
@@ -477,7 +492,7 @@ const buildIndex = (data, indexObj) => {
       throw new Error("key is empty");
     }
     return path;
-  }
+  };
 
   const stateGet = (keys, b, o) => {
     if (!Array.isArray(keys)) {
@@ -525,22 +540,58 @@ const buildIndex = (data, indexObj) => {
   const stateIndex = (key, action, options) => {
     const indexKey = JSON.stringify({
       k: key,
-      a: action
+      a: action,
     });
     let values = indexObj[indexKey];
     if (!values) {
       return [];
     }
     const accountId = options.accountId;
-    const accounts = isString(accountId) ? {[accountId] : true} : Array.isArray(accountId) ? accountId.reduce((acc, a) => {acc[a] = true; return acc;}, {}) : null;
-    if (accounts) {
-      values = values.filter((v) => v.a in accounts);
+    const accounts = isString(accountId)
+      ? { [accountId]: true }
+      : Array.isArray(accountId)
+      ? accountId.reduce((acc, a) => {
+          acc[a] = true;
+          return acc;
+        }, {})
+      : null;
+    const limit = options.limit || values.length;
+    if (limit <= 0) {
+      return [];
     }
-    return values.map((v) => ({
-      accountId: v.a,
-      blockHeight: v.b,
-      value: v.v,
-    }));
+    const result = [];
+
+    if (options.order === Order.desc) {
+      const from = options.from
+        ? bounds.le(values, { b: options.from }, valueCmp)
+        : values.length - 1;
+
+      for (let i = from; i >= 0; i--) {
+        const v = values[i];
+        if (result.length >= limit && v.b !== result[result.length - 1]?.b) {
+          break;
+        }
+        if (!accounts || v.a in accounts) {
+          result.push(v);
+        }
+      }
+    } else {
+      // Order.asc
+      const from = options.from
+        ? bounds.lt(values, { b: options.from }, valueCmp) + 1
+        : 0;
+      // Copy for performance reasons
+      for (let i = from; i < values.length; i++) {
+        const v = values[i];
+        if (result.length >= limit && v.b !== result[result.length - 1]?.b) {
+          break;
+        }
+        if (!accounts || v.a in accounts) {
+          result.push(v);
+        }
+      }
+    }
+    return result;
   };
 
   // console.log(
@@ -694,8 +745,6 @@ const buildIndex = (data, indexObj) => {
   //     }
   //   });
   // });
-
-
 
   scheduleUpdate(1);
 
