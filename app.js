@@ -331,28 +331,32 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
     return;
   }
 
-  objs.forEach(({ key, value }) => {
-    try {
-      if (key === undefined || value === undefined) {
-        // Not a valid index.
-        return;
+  try {
+    objs.forEach(({ key, value }) => {
+      try {
+        if (key === undefined || value === undefined) {
+          // Not a valid index.
+          return;
+        }
+        const indexKey = JSON.stringify({
+          k: key,
+          a: action,
+        });
+        const indexValue = {
+          a: accountId,
+          v: value,
+          b: blockHeight,
+        };
+        const values = indexObj[indexKey] || (indexObj[indexKey] = []);
+        values.push(indexValue);
+        // console.log("Added index", indexKey, indexValue);
+      } catch {
+        // ignore failed indices.
       }
-      const indexKey = JSON.stringify({
-        k: key,
-        a: action,
-      });
-      const indexValue = {
-        a: accountId,
-        v: value,
-        b: blockHeight,
-      };
-      const values = indexObj[indexKey] || (indexObj[indexKey] = []);
-      values.push(indexValue);
-      // console.log("Added index", indexKey, indexValue);
-    } catch {
-      // ignore failed indices.
-    }
-  });
+    });
+  } catch {
+    // ignore failed indices.
+  }
 };
 
 const buildIndex = (data, indexObj) => {
