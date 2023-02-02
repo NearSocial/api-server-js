@@ -406,6 +406,10 @@ const buildIndex = (data, indexObj) => {
       });
     });
   });
+  // sort indices by block height.
+  Object.values(indexObj).forEach((values) => {
+    values.sort((a, b) => a.b - b.b);
+  });
 };
 
 (async () => {
