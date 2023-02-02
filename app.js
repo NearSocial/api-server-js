@@ -394,7 +394,7 @@ const buildIndex = (data, indexObj) => {
       values.forEach((v) => {
         // Only need the first node, since there is no node deletion
         if (v.o) {
-          const emptyKeyValues = o[""] || [];
+          const emptyKeyValues = v.o[""] || [];
           emptyKeyValues.forEach((v) => {
             if (v.s !== undefined) {
               indexValue(indexObj, accountId, action, v.s, v.b);
