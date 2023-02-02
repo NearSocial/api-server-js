@@ -321,6 +321,21 @@ const recursiveCleanup = (o) => {
   return hasKeys ? o : null;
 };
 
+const sortKeys = (o) => {
+  if (Array.isArray(o)) {
+    o.forEach(sortKeys);
+  } else if (isObject(o)) {
+    Object.keys(o)
+      .sort()
+      .forEach((key) => {
+        const value = o[key];
+        delete o[key];
+        o[key] = value;
+        sortKeys(value);
+      });
+  }
+};
+
 const indexValue = (indexObj, accountId, action, s, blockHeight) => {
   let objs;
   try {
@@ -338,6 +353,8 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
           // Not a valid index.
           return;
         }
+
+        sortKeys(key);
         const indexKey = JSON.stringify({
           k: key,
           a: action,
@@ -541,6 +558,7 @@ const buildIndex = (data, indexObj) => {
   };
 
   const stateIndex = (key, action, options) => {
+    sortKeys(key);
     const indexKey = JSON.stringify({
       k: key,
       a: action,
