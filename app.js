@@ -792,7 +792,28 @@ const buildIndex = (data, indexObj) => {
       }
       const blockHeight = body.blockHeight;
       const options = body.options;
-      console.log("/get", keys, blockHeight, options);
+      console.log("POST /get", keys, blockHeight, options);
+      ctx.body = JSON.stringify(stateGet(keys, blockHeight, options));
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.get("/get", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.query;
+      let keys = body.keys;
+      if (!keys) {
+        throw new Error(`Missing keys`);
+      }
+      if (typeof keys === "string") {
+        keys = [keys];
+      }
+      const blockHeight = body.blockHeight;
+      const options = {};
+      console.log("GET /get", keys, blockHeight, options);
       ctx.body = JSON.stringify(stateGet(keys, blockHeight, options));
     } catch (e) {
       ctx.status = 400;
@@ -810,7 +831,28 @@ const buildIndex = (data, indexObj) => {
       }
       const blockHeight = body.blockHeight;
       const options = body.options;
-      console.log("/keys", keys, blockHeight, options);
+      console.log("POST /keys", keys, blockHeight, options);
+      ctx.body = JSON.stringify(stateKeys(keys, blockHeight, options));
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.get("/keys", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.query;
+      let keys = body.keys;
+      if (!keys) {
+        throw new Error(`Missing keys`);
+      }
+      if (typeof keys === "string") {
+        keys = [keys];
+      }
+      const blockHeight = body.blockHeight;
+      const options = {};
+      console.log("GET /keys", keys, blockHeight, options);
       ctx.body = JSON.stringify(stateKeys(keys, blockHeight, options));
     } catch (e) {
       ctx.status = 400;
@@ -834,7 +876,31 @@ const buildIndex = (data, indexObj) => {
       if (body.accountId) {
         options.accountId = options.accountId ?? body.accountId;
       }
-      console.log("/index", key, action, options);
+      console.log("POST /index", key, action, options);
+      ctx.body = JSON.stringify(stateIndex(key, action, options));
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.get("/index", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.query;
+      const key = body.key;
+      const action = body.action;
+      if (!key || !action) {
+        throw new Error(`"key" and "action" are required`);
+      }
+      const options = body.options || {};
+      if (!isObject(options)) {
+        throw new Error(`"options" is not an object`);
+      }
+      if (body.accountId) {
+        options.accountId = options.accountId ?? body.accountId;
+      }
+      console.log("GET /index", key, action, options);
       ctx.body = JSON.stringify(stateIndex(key, action, options));
     } catch (e) {
       ctx.status = 400;
