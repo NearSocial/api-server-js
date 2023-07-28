@@ -633,6 +633,12 @@ const buildIndex = (data, indexObj) => {
     }));
   };
 
+  const stateTime = (blockHeight) => {
+    return Array.isArray(blockHeight)
+      ? blockHeight.map((bh) => blockTimestamps[parseInt(bh)] ?? null)
+      : blockTimestamps[parseInt(blockHeight)] ?? null;
+  };
+
   // console.log(
   //   JSON.stringify(
   //     stateKeys(["*/post/meme"], undefined, {
@@ -923,6 +929,38 @@ const buildIndex = (data, indexObj) => {
       }
       console.log("GET /index", key, action, options);
       ctx.body = cachedJsonResult(stateIndex, key, action, options);
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.get("/time", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.query;
+      const blockHeight = body.blockHeight;
+      if (!blockHeight) {
+        throw new Error(`"blockHeight" is required`);
+      }
+      console.log("GET /time", blockHeight);
+      ctx.body = cachedJsonResult(stateTime, blockHeight);
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.post("/time", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.body;
+      const blockHeight = body.blockHeight;
+      if (!blockHeight) {
+        throw new Error(`"blockHeight" is required`);
+      }
+      console.log("POST /time", blockHeight);
+      ctx.body = cachedJsonResult(stateTime, blockHeight);
     } catch (e) {
       ctx.status = 400;
       ctx.body = `${e}`;
