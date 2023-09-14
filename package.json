@@ -1,7 +1,7 @@
 {
   "name": "api-server-js",
   "version": "0.6.0",
-  "main": "index.js",
+  "main": "app.js",
   "license": "MIT",
   "dependencies": {
     "@koa/cors": "^3.2.0",
