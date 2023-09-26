@@ -79,9 +79,12 @@ function loadState(filename, ignore) {
     try {
       const rs = fs.createReadStream(filename, { encoding: "utf-8" });
       const jsonStreamParser = JSONStream.parse();
-      rs.pipe(jsonStreamParser);
-      jsonStreamParser.on("data", (data) => {
-        resolve(data);
+
+      rs.on("error", (e) => {
+        if (!ignore) {
+          reject(e);
+        }
+        resolve(null);
       });
 
       jsonStreamParser.on("error", (e) => {
@@ -90,6 +93,11 @@ function loadState(filename, ignore) {
         }
         console.warn("Error parsing JSON:", filename, e);
         resolve(null);
+      });
+
+      rs.pipe(jsonStreamParser);
+      jsonStreamParser.on("data", (data) => {
+        resolve(data);
       });
 
       // Handle the end of the stream

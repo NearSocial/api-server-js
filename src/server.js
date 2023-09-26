@@ -48,12 +48,11 @@ let blockTimestamps = {};
 
 const runServer = async () => {
   console.log("Loading state...");
-  const state = // loadJson(NewStateFilename, false) ||
-    (await loadState(NewStateFilename, false)) ||
-      loadJson(StateFilename, true) ||
-      loadJson(SnapshotFilename, true) || {
-        data: {},
-      };
+  const state = (await loadState(NewStateFilename, true)) ||
+    loadJson(StateFilename, true) ||
+    loadJson(SnapshotFilename, true) || {
+      data: {},
+    };
 
   blockTimestamps = state.blockTimes = state.blockTimes || {};
   console.log("accounts", Object.keys(state.data).length);
