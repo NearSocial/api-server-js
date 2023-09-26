@@ -1,4 +1,12 @@
-const { isObject, isString, saveJson, loadJson } = require("./utils");
+const {
+  isObject,
+  isString,
+  loadJson,
+  saveState,
+  loadState,
+  sortKeys,
+  blockCmp,
+} = require("./utils");
 const bounds = require("binary-search-bounds");
 
 const cors = require("@koa/cors");
@@ -18,15 +26,17 @@ const Receipts = require("./receipts");
 const {
   buildIndex,
   recursiveSet,
-  indexValue,
   mergeData,
   recursiveGet,
   recursiveCleanup,
   recursiveKeys,
   getInnerMap,
+  buildIndexForBlock,
+  KeysReturnType,
 } = require("./social");
 
 const StateFilename = "res/state.json";
+const NewStateFilename = "res/state_v2.json";
 const SnapshotFilename = "res/snapshot.json";
 
 const Order = {
@@ -34,52 +44,31 @@ const Order = {
   asc: "asc",
 };
 
-const KeysReturnType = {
-  True: "True",
-  BlockHeight: "BlockHeight",
-  History: "History",
-};
-
 let blockTimestamps = {};
 
 const runServer = async () => {
   console.log("Loading state...");
-  const state = loadJson(StateFilename, true) ||
-    loadJson(SnapshotFilename, true) || {
-      data: {},
-    };
+  const state = // loadJson(NewStateFilename, false) ||
+    (await loadState(NewStateFilename, false)) ||
+      loadJson(StateFilename, true) ||
+      loadJson(SnapshotFilename, true) || {
+        data: {},
+      };
+
   blockTimestamps = state.blockTimes = state.blockTimes || {};
+  console.log("accounts", Object.keys(state.data).length);
+  console.log("blockTimestamps", Object.keys(state.blockTimes).length);
   const indexObj = {};
 
   console.log("Building index...");
   buildIndex(state.data, indexObj);
-  const oneBlockCache = new Map();
 
+  const oneBlockCache = new Map();
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
 
   const addData = (data, blockHeight) => {
     recursiveSet(state.data, data, blockHeight);
-    Object.entries(data).forEach(([accountId, account]) => {
-      const index = account?.index;
-      if (isObject(index)) {
-        Object.entries(index).forEach(([action, value]) => {
-          if (isString(value)) {
-            indexValue(indexObj, accountId, action, value, blockHeight);
-          } else if (isObject(value)) {
-            const emptyKeyValue = value[""];
-            if (isString(emptyKeyValue)) {
-              indexValue(
-                indexObj,
-                accountId,
-                action,
-                emptyKeyValue,
-                blockHeight
-              );
-            }
-          }
-        });
-      }
-    });
+    buildIndexForBlock(data, indexObj, blockHeight);
   };
 
   const applyReceipts = (receipts) => {
@@ -130,7 +119,7 @@ const runServer = async () => {
 
   console.log("Catching up...");
   await fetchAndApply();
-  saveJson(state, StateFilename);
+  saveState(state, NewStateFilename);
 
   const scheduleUpdate = (delay) =>
     setTimeout(async () => {
@@ -225,7 +214,7 @@ const runServer = async () => {
 
     if (options.order === Order.desc) {
       const from = options.from
-        ? bounds.le(values, { b: options.from }, valueCmp)
+        ? bounds.le(values, { b: options.from }, blockCmp)
         : values.length - 1;
 
       for (let i = from; i >= 0; i--) {
@@ -240,7 +229,7 @@ const runServer = async () => {
     } else {
       // Order.asc
       const from = options.from
-        ? bounds.lt(values, { b: options.from }, valueCmp) + 1
+        ? bounds.lt(values, { b: options.from }, blockCmp) + 1
         : 0;
       // Copy for performance reasons
       for (let i = from; i < values.length; i++) {
@@ -270,7 +259,7 @@ const runServer = async () => {
 
   // Save state once a minute
   setInterval(() => {
-    saveJson(state, StateFilename);
+    saveState(state, NewStateFilename);
   }, 60000);
 
   const cachedJsonResult = (fn, ...args) => {
@@ -443,7 +432,7 @@ const runServer = async () => {
   });
 
   app
-    .use(logger())
+    .use(logger("combined"))
     .use(cors())
     .use(bodyParser())
     .use(router.routes())

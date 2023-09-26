@@ -1,9 +1,15 @@
-const { isObject, isString } = require("./utils");
+const { isObject, isString, sortKeys, blockCmp } = require("./utils");
 const bounds = require("binary-search-bounds");
 
 const KeyBlockHeight = ":block";
 const KeyTimestamp = ":timestamp";
 const ErrorUnknownType = "newValue is not object, null or string";
+
+const KeysReturnType = {
+  True: "True",
+  BlockHeight: "BlockHeight",
+  History: "History",
+};
 
 const getInnerMap = (map, key) => {
   if (!map.has(key)) {
@@ -81,10 +87,9 @@ const mergeData = (obj, newObj) => {
   });
 };
 
-const valueCmp = (a, b) => a.b - b.b;
 const findValueAtBlockHeight = (values, b) =>
   b !== undefined
-    ? values?.[bounds.le(values, { b }, valueCmp)]
+    ? values?.[bounds.le(values, { b }, blockCmp)]
     : values.length
     ? values[values.length - 1]
     : undefined;
@@ -93,7 +98,7 @@ const extractBlockHistory = (values, b) =>
   values
     .slice(
       0,
-      b !== undefined ? bounds.le(values, { b }, valueCmp) + 1 : values.length
+      b !== undefined ? bounds.le(values, { b }, blockCmp) + 1 : values.length
     )
     .map((v) => v.b);
 
@@ -263,21 +268,6 @@ const recursiveCleanup = (o) => {
   return hasKeys ? o : null;
 };
 
-const sortKeys = (o) => {
-  if (Array.isArray(o)) {
-    o.forEach(sortKeys);
-  } else if (isObject(o)) {
-    Object.keys(o)
-      .sort()
-      .forEach((key) => {
-        const value = o[key];
-        delete o[key];
-        o[key] = value;
-        sortKeys(value);
-      });
-  }
-};
-
 const indexValue = (indexObj, accountId, action, s, blockHeight) => {
   let objs;
   try {
@@ -318,6 +308,24 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
   }
 };
 
+const buildIndexForBlock = (data, indexObj, blockHeight) => {
+  Object.entries(data).forEach(([accountId, account]) => {
+    const index = account?.index;
+    if (isObject(index)) {
+      Object.entries(index).forEach(([action, value]) => {
+        if (isString(value)) {
+          indexValue(indexObj, accountId, action, value, blockHeight);
+        } else if (isObject(value)) {
+          const emptyKeyValue = value[""];
+          if (isString(emptyKeyValue)) {
+            indexValue(indexObj, accountId, action, emptyKeyValue, blockHeight);
+          }
+        }
+      });
+    }
+  });
+};
+
 const buildIndex = (data, indexObj) => {
   Object.entries(data).forEach(([accountId, accountValues]) => {
     let v = findValueAtBlockHeight(accountValues);
@@ -356,6 +364,7 @@ const buildIndex = (data, indexObj) => {
 
 module.exports = {
   buildIndex,
+  buildIndexForBlock,
   recursiveSet,
   indexValue,
   mergeData,
@@ -363,4 +372,5 @@ module.exports = {
   recursiveCleanup,
   recursiveKeys,
   getInnerMap,
+  KeysReturnType,
 };
