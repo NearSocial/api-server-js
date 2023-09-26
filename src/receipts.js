@@ -18,25 +18,6 @@ const Receipts = {
     return this;
   },
 
-  // fetchLastNEvents: async function (limit) {
-  //   const res = await this.client.query(
-  //     "SELECT * from receipts order by block_height desc limit $1",
-  //     [limit]
-  //   );
-  //   res.rows.forEach((row) => {
-  //     this.lastBlockHeight = Math.max(
-  //       this.lastBlockHeight,
-  //       parseInt(row.block_height)
-  //     );
-  //     try {
-  //       row.event = JSON.parse(row.event);
-  //     } catch (e) {
-  //       row.event = null;
-  //     }
-  //   });
-  //   return res.rows;
-  // },
-
   fetchReceipts: async function () {
     const res = await this.client.query(
       `SELECT * from receipts where
