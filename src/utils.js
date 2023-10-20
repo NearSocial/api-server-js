@@ -114,6 +114,23 @@ function loadState(filename, ignore) {
   });
 }
 
+const keyToPath = (key) => {
+  if (!isString(key)) {
+    throw new Error("key is not a string");
+  }
+  if (key.endsWith("//")) {
+    return null;
+  }
+  const path = key.split("/");
+  if (path?.[path.length - 1] === "") {
+    path.pop();
+  }
+  if (path.length === 0) {
+    throw new Error("key is empty");
+  }
+  return path;
+};
+
 module.exports = {
   sortKeys,
   blockCmp,
@@ -123,4 +140,5 @@ module.exports = {
   isString,
   saveState,
   loadState,
+  keyToPath,
 };

@@ -6,6 +6,7 @@ const {
   loadState,
   sortKeys,
   blockCmp,
+  keyToPath,
 } = require("./utils");
 const bounds = require("binary-search-bounds");
 
@@ -24,14 +25,14 @@ const bodyParser = require("koa-bodyparser");
 
 const Receipts = require("./receipts");
 const {
-  buildIndex,
+  processStateData,
+  processBlockData,
   recursiveSet,
   mergeData,
   recursiveGet,
   recursiveCleanup,
   recursiveKeys,
   getInnerMap,
-  buildIndexForBlock,
   KeysReturnType,
 } = require("./social");
 
@@ -58,16 +59,17 @@ const runServer = async () => {
   console.log("accounts", Object.keys(state.data).length);
   console.log("blockTimestamps", Object.keys(state.blockTimes).length);
   const indexObj = {};
+  const events = [];
 
-  console.log("Building index...");
-  buildIndex(state.data, indexObj);
+  console.log("Processing state data...");
+  processStateData({ data: state.data, indexObj, events });
 
   const oneBlockCache = new Map();
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
 
   const addData = (data, blockHeight) => {
     recursiveSet(state.data, data, blockHeight);
-    buildIndexForBlock(data, indexObj, blockHeight);
+    processBlockData({ data, indexObj, blockHeight, events });
   };
 
   const applyReceipts = (receipts) => {
@@ -125,23 +127,6 @@ const runServer = async () => {
       await fetchAndApply();
       scheduleUpdate(250);
     }, delay);
-
-  const keyToPath = (key) => {
-    if (!isString(key)) {
-      throw new Error("key is not a string");
-    }
-    if (key.endsWith("//")) {
-      return null;
-    }
-    const path = key.split("/");
-    if (path?.[path.length - 1] === "") {
-      path.pop();
-    }
-    if (path.length === 0) {
-      throw new Error("key is empty");
-    }
-    return path;
-  };
 
   const stateGet = (keys, b, o) => {
     if (!Array.isArray(keys)) {

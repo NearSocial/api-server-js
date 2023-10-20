@@ -1,5 +1,17 @@
-const { isObject, isString, sortKeys, blockCmp } = require("./utils");
+const {
+  isObject,
+  isString,
+  sortKeys,
+  blockCmp,
+  keyToPath,
+} = require("./utils");
 const bounds = require("binary-search-bounds");
+const {
+  makeEvent,
+  EventDataPatterns,
+  EventProcessing,
+  EventIndexKeys,
+} = require("./events");
 
 const KeyBlockHeight = ":block";
 const KeyTimestamp = ":timestamp";
@@ -90,7 +102,7 @@ const mergeData = (obj, newObj) => {
 const findValueAtBlockHeight = (values, b) =>
   b !== undefined
     ? values?.[bounds.le(values, { b }, blockCmp)]
-    : values.length
+    : values?.length
     ? values[values.length - 1]
     : undefined;
 
@@ -174,6 +186,9 @@ const recursiveGet = (res, obj, objBlock, keys, b, options) => {
     if (!v) {
       return;
     }
+    if (options.exactBlockMatch && v.b !== b) {
+      return;
+    }
     const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
     if (o) {
       if (keys.length > 1 || isRecursiveMatch) {
@@ -211,11 +226,7 @@ const recursiveKeys = (res, obj, keys, b, options) => {
       ? [[matchKey, obj[matchKey]]]
       : [];
   entries.forEach(([key, values]) => {
-    const v = findValueAtBlockHeight(values, b);
-    if (!v) {
-      return;
-    }
-    const o = v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
+    const o = getValuesObject(values, b);
     if (keys.length === 1) {
       if (o || isString(v?.s) || (options.returnDeleted && v?.s === null)) {
         if (o && options.valuesOnly) {
@@ -268,10 +279,17 @@ const recursiveCleanup = (o) => {
   return hasKeys ? o : null;
 };
 
-const indexValue = (indexObj, accountId, action, s, blockHeight) => {
+const addIndexValue = ({
+  events,
+  indexObj,
+  accountId,
+  action,
+  value,
+  blockHeight,
+}) => {
   let objs;
   try {
-    const parsed = JSON.parse(s);
+    const parsed = JSON.parse(value);
     objs = Array.isArray(parsed) ? parsed : [parsed];
   } catch {
     // ignore failed indices.
@@ -298,6 +316,14 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
         };
         const values = indexObj[indexKey] || (indexObj[indexKey] = []);
         values.push(indexValue);
+        addEventFromIndex({
+          events,
+          key,
+          action,
+          accountId,
+          value,
+          blockHeight,
+        });
         // console.log("Added index", indexKey, indexValue);
       } catch {
         // ignore failed indices.
@@ -308,17 +334,31 @@ const indexValue = (indexObj, accountId, action, s, blockHeight) => {
   }
 };
 
-const buildIndexForBlock = (data, indexObj, blockHeight) => {
+const buildIndexForBlock = ({ data, indexObj, blockHeight, events }) => {
   Object.entries(data).forEach(([accountId, account]) => {
     const index = account?.index;
     if (isObject(index)) {
       Object.entries(index).forEach(([action, value]) => {
         if (isString(value)) {
-          indexValue(indexObj, accountId, action, value, blockHeight);
+          addIndexValue({
+            events,
+            indexObj,
+            accountId,
+            action,
+            value,
+            blockHeight,
+          });
         } else if (isObject(value)) {
           const emptyKeyValue = value[""];
           if (isString(emptyKeyValue)) {
-            indexValue(indexObj, accountId, action, emptyKeyValue, blockHeight);
+            addIndexValue({
+              events,
+              indexObj,
+              accountId,
+              action,
+              value: emptyKeyValue,
+              blockHeight,
+            });
           }
         }
       });
@@ -326,17 +366,15 @@ const buildIndexForBlock = (data, indexObj, blockHeight) => {
   });
 };
 
-const buildIndex = (data, indexObj) => {
+const buildIndex = ({ data, indexObj, events }) => {
   Object.entries(data).forEach(([accountId, accountValues]) => {
-    let v = findValueAtBlockHeight(accountValues);
-    let o = v?.o ?? (v?.i !== undefined ? accountValues[v.i].o : null);
+    let o = getValuesObject(accountValues);
 
     const indexValues = o?.index;
     if (!indexValues) {
       return;
     }
-    v = findValueAtBlockHeight(indexValues);
-    o = v?.o ?? (v?.i !== undefined ? indexValues[v.i].o : null);
+    o = getValuesObject(indexValues);
     if (!isObject(o)) {
       return;
     }
@@ -347,11 +385,25 @@ const buildIndex = (data, indexObj) => {
           const emptyKeyValues = v.o[""] || [];
           emptyKeyValues.forEach((v) => {
             if (v.s !== undefined) {
-              indexValue(indexObj, accountId, action, v.s, v.b);
+              addIndexValue({
+                events,
+                indexObj,
+                accountId,
+                action,
+                value: v.s,
+                blockHeight: v.b,
+              });
             }
           });
         } else if (v.s !== undefined) {
-          indexValue(indexObj, accountId, action, v.s, v.b);
+          addIndexValue({
+            events,
+            indexObj,
+            accountId,
+            action,
+            value: v.s,
+            blockHeight: v.b,
+          });
         }
       });
     });
@@ -362,11 +414,139 @@ const buildIndex = (data, indexObj) => {
   });
 };
 
+const getValuesObject = (values, b) => {
+  const v = findValueAtBlockHeight(values, b);
+  return v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
+};
+
+// Extracts changes from the account object for a given path.
+const extractChanges = (accountObject, path, b) => {
+  const keys = keyToPath(path);
+  let res = {};
+  recursiveGet(res, accountObject, b, keys, b, {
+    returnDeleted: true,
+    exactBlockMatch: true,
+  });
+  for (const key of keys) {
+    if (key === "**" || key === "*") {
+      break;
+    }
+    res = res?.[key];
+  }
+  return res;
+};
+
+const extractAllChanges = (accountObject, path) => {
+  const keys = keyToPath(path);
+  let o = accountObject;
+  let vs = null;
+  for (const key of keys) {
+    if (key === "**" || key === "*") {
+      break;
+    }
+    vs = o?.[key];
+    o = getValuesObject(vs);
+  }
+
+  return (
+    vs?.map((v) => ({
+      blockHeight: v.b,
+      changes: extractChanges(accountObject, path, v.b),
+    })) || []
+  );
+};
+
+// This method goes through all data for all block and extracts all known events.
+// The list of events it extracts:
+// - Profile modified
+// - Widget modified
+// - Follow Edge created or deleted
+// - Post created
+// - Comment created
+// - Settings modified
+// - Hide Edge created
+const buildEventsFromData = ({ data, events }) => {
+  Object.entries(data).forEach(([accountId, accountValues]) => {
+    const accountObject = getValuesObject(accountValues);
+    if (!isObject(accountObject)) {
+      return;
+    }
+
+    EventDataPatterns.forEach(({ eventType, path, processing }) => {
+      extractAllChanges(accountObject, path).forEach(
+        ({ blockHeight, changes }) => {
+          switch (processing) {
+            case EventProcessing.ObjectRequired:
+              if (!isObject(changes)) {
+                return;
+              }
+              break;
+            case EventProcessing.ConvertToObject:
+              if (!isObject(changes)) {
+                changes = {
+                  "": changes,
+                };
+              }
+              break;
+            case EventProcessing.ConvertToValue:
+              if (isObject(changes)) {
+                changes = changes[""];
+              }
+              break;
+          }
+
+          events.push(
+            makeEvent({
+              eventType,
+              blockHeight,
+              accountId,
+              changes,
+            })
+          );
+        }
+      );
+    });
+  });
+};
+
+const addEventFromIndex = ({
+  events,
+  key,
+  action,
+  accountId,
+  value,
+  blockHeight,
+}) => {
+  if (EventIndexKeys.hasOwnProperty(action)) {
+    events.push(
+      makeEvent({
+        eventType: EventIndexKeys[action],
+        blockHeight,
+        accountId,
+        data: { key, value },
+      })
+    );
+  }
+};
+
+const processStateData = ({ data, indexObj, events }) => {
+  console.log("Building index...");
+  buildIndex({ data, indexObj, events });
+  console.log("Building events...");
+  buildEventsFromData({ data, events });
+  console.log("Sorting events...");
+  events.sort((a, b) => a.b - b.b);
+  console.log("Total events:", events.length);
+};
+
+const processBlockData = ({ data, indexObj, blockHeight, events }) => {
+  buildIndexForBlock({ data, indexObj, blockHeight, events });
+};
+
 module.exports = {
-  buildIndex,
-  buildIndexForBlock,
+  processStateData,
+  processBlockData,
   recursiveSet,
-  indexValue,
   mergeData,
   recursiveGet,
   recursiveCleanup,
