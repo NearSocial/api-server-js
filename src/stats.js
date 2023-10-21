@@ -240,6 +240,12 @@ class Stats {
       if (changes?.metadata?.tags?.hasOwnProperty("app")) {
         account.stats.inc("widget.app", blockHeight, this.globalStats);
       }
+
+      // Unique widgets
+      if (!account.widgets.has(widgetSrc)) {
+        account.widgets.add(widgetSrc);
+        account.stats.inc("widget.unique", blockHeight, this.globalStats);
+      }
     });
   }
 
