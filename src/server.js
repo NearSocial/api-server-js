@@ -35,6 +35,7 @@ const {
   getInnerMap,
   KeysReturnType,
 } = require("./social");
+const { Stats } = require("./stats");
 
 const StateFilename = "res/state.json";
 const NewStateFilename = "res/state_v2.json";
@@ -60,9 +61,14 @@ const runServer = async () => {
   console.log("blockTimestamps", Object.keys(state.blockTimes).length);
   const indexObj = {};
   const events = [];
+  const stats = new Stats(blockTimestamps);
 
   console.log("Processing state data...");
   processStateData({ data: state.data, indexObj, events });
+  console.log("Computing stats...");
+  stats.processEvents(events);
+
+  console.log(stats.accounts.get("mob.near").stats.toString());
 
   const oneBlockCache = new Map();
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
@@ -70,6 +76,7 @@ const runServer = async () => {
   const addData = (data, blockHeight) => {
     recursiveSet(state.data, data, blockHeight);
     processBlockData({ data, indexObj, blockHeight, events });
+    stats.processEvents(events);
   };
 
   const applyReceipts = (receipts) => {

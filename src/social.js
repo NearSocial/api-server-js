@@ -500,7 +500,7 @@ const buildEventsFromData = ({ data, events }) => {
               eventType,
               blockHeight,
               accountId,
-              changes,
+              data: changes,
             })
           );
         }

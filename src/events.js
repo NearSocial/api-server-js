@@ -5,7 +5,7 @@ const EventProcessing = {
   ConvertToValue: 3,
 };
 
-const Event = {
+const EventType = {
   Profile: 0,
   Widget: 1,
   FollowEdge: 2,
@@ -26,51 +26,51 @@ const Event = {
 
 const EventDataPatterns = [
   {
-    eventType: Event.Profile,
+    eventType: EventType.Profile,
     path: "profile/**",
     processing: EventProcessing.ObjectRequired,
   },
   {
-    eventType: Event.Widget,
+    eventType: EventType.Widget,
     path: "widget/*/**",
-    processing: EventProcessing.ConvertToObject,
+    processing: EventProcessing.ObjectRequired,
   },
   {
-    eventType: Event.FollowEdge,
+    eventType: EventType.FollowEdge,
     path: "graph/follow/*",
     processing: EventProcessing.ObjectRequired,
   },
   {
-    eventType: Event.HideEdge,
+    eventType: EventType.HideEdge,
     path: "graph/hide/*",
     processing: EventProcessing.ObjectRequired,
   },
   {
-    eventType: Event.Post,
+    eventType: EventType.Post,
     path: "post/main",
     processing: EventProcessing.ConvertToValue,
   },
   {
-    eventType: Event.Comment,
+    eventType: EventType.Comment,
     path: "post/comment",
     processing: EventProcessing.ConvertToValue,
   },
   {
-    eventType: Event.Settings,
+    eventType: EventType.Settings,
     path: "settings/**",
     processing: EventProcessing.ObjectRequired,
   },
 ];
 
 const EventIndexKeys = {
-  like: Event.IndexLike,
-  notify: Event.IndexNotify,
-  post: Event.IndexPost,
-  comment: Event.IndexComment,
-  hashtag: Event.IndexHashtag,
-  tosAccept: Event.IndexTosAccept,
-  flag: Event.IndexFlag,
-  repost: Event.IndexRepost,
+  like: EventType.IndexLike,
+  notify: EventType.IndexNotify,
+  post: EventType.IndexPost,
+  comment: EventType.IndexComment,
+  hashtag: EventType.IndexHashtag,
+  tosAccept: EventType.IndexTosAccept,
+  flag: EventType.IndexFlag,
+  repost: EventType.IndexRepost,
 };
 
 const makeEvent = ({ eventType, accountId, blockHeight, data }) => {
@@ -83,7 +83,7 @@ const makeEvent = ({ eventType, accountId, blockHeight, data }) => {
 };
 
 module.exports = {
-  Event,
+  EventType,
   EventDataPatterns,
   EventProcessing,
   EventIndexKeys,
