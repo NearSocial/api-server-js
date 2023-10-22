@@ -1,4 +1,5 @@
 const { EventType } = require("./events");
+const { isString, isObject } = require("./utils");
 
 class Post {
   constructor(accountId, blockHeight, groupId) {
@@ -6,31 +7,48 @@ class Post {
     this.blockHeight = blockHeight;
     this.groupId = groupId;
     this.postId = Post.makeId(accountId, blockHeight);
-    this.comments = new Map();
-    this.likes = new Set();
+    this.comments = [];
     this.reposts = new Set();
   }
 
   static makeId(accountId, blockHeight) {
     return JSON.stringify({
-      type: "social",
-      path: `${accountId}/post/main`,
       blockHeight,
+      path: `${accountId}/post/main`,
+      type: "social",
+    });
+  }
+}
+
+class Comment {
+  constructor(accountId, blockHeight, item) {
+    this.accountId = accountId;
+    this.blockHeight = blockHeight;
+    this.item = item;
+    this.itemId = JSON.stringify(item);
+    this.commentId = Comment.makeId(accountId, blockHeight);
+    this.likes = new Set();
+  }
+
+  static makeId(accountId, blockHeight) {
+    return JSON.stringify({
+      blockHeight,
+      path: `${accountId}/post/comment`,
+      type: "social",
     });
   }
 }
 
 class StatValue {
-  constructor(index, blockHeight) {
+  constructor(index, value, blockHeight) {
     this.index = index;
-    this.count = 1;
-    this.first = blockHeight;
-    this.last = blockHeight;
+    this.value = value;
+    this.blocks = [blockHeight];
   }
 
-  inc(blockHeight) {
-    this.count++;
-    this.last = blockHeight;
+  incBy(value, blockHeight) {
+    this.value += value;
+    this.blocks.push(blockHeight);
   }
 }
 
@@ -40,15 +58,15 @@ class StatCounter {
     this.accountId = accountId;
   }
 
-  inc(key, blockHeight, globalStats) {
+  incBy(key, value, blockHeight, globalStats) {
     if (!this.stats.has(key)) {
-      globalStats?.inc(key, blockHeight, undefined);
+      globalStats?.incBy(key, value, blockHeight, undefined);
       const index = globalStats
         ? globalStats.nextIndex(key, this.accountId)
         : 0;
-      this.stats.set(key, new StatValue(index, blockHeight));
+      this.stats.set(key, new StatValue(index, value, blockHeight));
     } else {
-      this.stats.get(key).inc(blockHeight);
+      this.stats.get(key).incBy(value, blockHeight);
     }
   }
 
@@ -66,7 +84,9 @@ class StatCounter {
   toString() {
     const result = [];
     for (const [key, value] of this.stats.entries()) {
-      result.push(`${key}=${JSON.stringify(value)}`);
+      result.push(
+        `${key}={index:${value.index}, value: ${value.value}, numBlocks:${value.blocks.length}}`
+      );
     }
     return result.join("\n");
   }
@@ -82,6 +102,8 @@ class Account {
       hiddenBy: new Set(),
     };
     this.widgets = new Set();
+    this.posts = [];
+    this.comments = [];
     this.stats = new StatCounter(accountId);
   }
 }
@@ -107,18 +129,26 @@ class Stats {
     });
   }
 
-  getAccount(accountId, blockHeight) {
+  getAccount(accountId) {
     if (!this.accounts.has(accountId)) {
       this.accounts.set(accountId, new Account(accountId));
     }
-    const account = this.accounts.get(accountId);
-    account.stats.inc("account", blockHeight, this.globalStats);
-    return account;
+    return this.accounts.get(accountId);
+  }
+
+  incBy(key, value, event, account) {
+    account = account ?? this.getAccount(event.a);
+    account.stats.incBy(key, value, event.b, this.globalStats);
+  }
+
+  inc(key, event, account) {
+    this.incBy(key, 1, event, account);
   }
 
   processEvent(event) {
     this.eventsCount++;
     const account = this.getAccount(event.a, event.b);
+    this.inc("event", event, account);
     switch (event.t) {
       case EventType.Profile:
         this.processProfileEvent(event, account);
@@ -173,18 +203,18 @@ class Stats {
   processProfileEvent(event, account) {
     const changes = event.d;
     const blockHeight = event.b;
-    account.stats.inc("profile", blockHeight, this.globalStats);
+    this.inc("profile", event, account);
     if (changes?.name) {
-      account.stats.inc("profile.name", blockHeight, this.globalStats);
+      this.inc("profile.name", event, account);
     }
     if (
       changes?.image?.url ||
       changes?.image?.ipfs_cid ||
       (changes?.image?.nft?.tokenId && changes?.image?.nft?.contractId)
     ) {
-      account.stats.inc("profile.image", blockHeight, this.globalStats);
+      this.inc("profile.image", event, account);
       if (changes?.image?.nft?.tokenId && changes?.image?.nft?.contractId) {
-        account.stats.inc("profile.image.nft", blockHeight, this.globalStats);
+        this.inc("profile.image.nft", event, account);
       }
     }
     if (
@@ -193,14 +223,10 @@ class Stats {
       (changes?.backgroundImage?.nft?.tokenId &&
         changes?.backgroundImage?.nft?.contractId)
     ) {
-      account.stats.inc(
-        "profile.backgroundImage",
-        blockHeight,
-        this.globalStats
-      );
+      this.inc("profile.backgroundImage", event, account);
     }
     if (changes?.description) {
-      account.stats.inc("profile.description", blockHeight, this.globalStats);
+      this.inc("profile.description", event, account);
     }
     if (
       changes?.linktree?.twitter ||
@@ -208,79 +234,55 @@ class Stats {
       changes?.linktree?.telegram ||
       changes?.linktree?.website
     ) {
-      account.stats.inc("profile.linktree", blockHeight, this.globalStats);
+      this.inc("profile.linktree", event, account);
       if (changes?.linktree?.twitter) {
-        account.stats.inc(
-          "profile.linktree.twitter",
-          blockHeight,
-          this.globalStats
-        );
+        this.inc("profile.linktree.twitter", event, account);
       }
       if (changes?.linktree?.github) {
-        account.stats.inc(
-          "profile.linktree.github",
-          blockHeight,
-          this.globalStats
-        );
+        this.inc("profile.linktree.github", event, account);
       }
       if (changes?.linktree?.telegram) {
-        account.stats.inc(
-          "profile.linktree.telegram",
-          blockHeight,
-          this.globalStats
-        );
+        this.inc("profile.linktree.telegram", event, account);
       }
       if (changes?.linktree?.website) {
-        account.stats.inc(
-          "profile.linktree.website",
-          blockHeight,
-          this.globalStats
-        );
+        this.inc("profile.linktree.website", event, account);
       }
     }
     if (Object.keys(changes?.tags || {}).length > 0) {
-      account.stats.inc("profile.tags", blockHeight, this.globalStats);
+      this.inc("profile.tags", event, account);
     }
   }
 
   processWidgetEvent(event, account) {
     const blockHeight = event.b;
     Object.entries(event.d || {}).forEach(([widgetSrc, changes]) => {
-      account.stats.inc("widget", blockHeight, this.globalStats);
+      this.inc("widget", event, account);
       if (changes?.hasOwnProperty("")) {
-        account.stats.inc("widget.code", blockHeight, this.globalStats);
+        this.inc("widget.code", event, account);
+        const code = changes[""];
+        if (isString(code) && code.length > 0) {
+          this.incBy("widget.code.length", code.length, event, account);
+        }
       }
       if (Object.keys(changes?.metadata || {}).length > 0) {
-        account.stats.inc("widget.metadata", blockHeight, this.globalStats);
+        this.inc("widget.metadata", event, account);
       }
       if (changes?.metadata?.hasOwnProperty("name")) {
-        account.stats.inc(
-          "widget.metadata.name",
-          blockHeight,
-          this.globalStats
-        );
+        this.inc("widget.metadata.name", event, account);
       }
       if (changes?.metadata?.hasOwnProperty("description")) {
-        account.stats.inc(
-          "widget.metadata.description",
-          blockHeight,
-          this.globalStats
-        );
+        this.inc("widget.metadata.description", event, account);
       }
       if (Object.keys(changes?.metadata?.image || {}).length > 0) {
-        account.stats.inc(
-          "widget.metadata.image",
-          blockHeight,
-          this.globalStats
-        );
+        this.inc("widget.metadata.image", event, account);
       }
       if (changes?.metadata?.tags?.hasOwnProperty("app")) {
-        account.stats.inc("widget.app", blockHeight, this.globalStats);
+        this.inc("widget.app", event, account);
       }
 
       if (!account.widgets.has(widgetSrc)) {
         account.widgets.add(widgetSrc);
-        account.stats.inc("widget.unique", blockHeight, this.globalStats);
+        this.inc("widget.unique", event, account);
       }
     });
   }
@@ -291,18 +293,18 @@ class Stats {
       if (changes !== null) {
         if (!account.graph.following.has(receiverId)) {
           account.graph.following.add(receiverId);
-          account.stats.inc("graph.follow", blockHeight, this.globalStats);
+          this.inc("graph.follow", event, account);
           const receiver = this.getAccount(receiverId, blockHeight);
           receiver.graph.followers.add(account.accountId);
-          receiver.stats.inc("graph.followed", blockHeight, this.globalStats);
+          this.inc("graph.followed", event, receiver);
         }
       } else {
         if (account.graph.following.has(receiverId)) {
           account.graph.following.delete(receiverId);
-          account.stats.inc("graph.unfollow", blockHeight, this.globalStats);
+          this.inc("graph.unfollow", event, account);
           const receiver = this.getAccount(receiverId, blockHeight);
           receiver.graph.followers.delete(account.accountId);
-          receiver.stats.inc("graph.unfollowed", blockHeight, this.globalStats);
+          this.inc("graph.unfollowed", event, receiver);
         }
       }
     });
@@ -314,18 +316,18 @@ class Stats {
       if (changes !== null) {
         if (!account.graph.hidden.has(receiverId)) {
           account.graph.hidden.add(receiverId);
-          account.stats.inc("graph.hide", blockHeight, this.globalStats);
+          this.inc("graph.hide", event, account);
           const receiver = this.getAccount(receiverId, blockHeight);
           receiver.graph.hiddenBy.add(account.accountId);
-          receiver.stats.inc("graph.hidden", blockHeight, this.globalStats);
+          this.inc("graph.hidden", event, receiver);
         }
       } else {
         if (account.graph.hidden.has(receiverId)) {
           account.graph.hidden.delete(receiverId);
-          account.stats.inc("graph.unhide", blockHeight, this.globalStats);
+          this.inc("graph.unhide", event, account);
           const receiver = this.getAccount(receiverId, blockHeight);
           receiver.graph.hiddenBy.delete(account.accountId);
-          receiver.stats.inc("graph.unhidden", blockHeight, this.globalStats);
+          this.inc("graph.unhidden", event, receiver);
         }
       }
     });
@@ -340,26 +342,89 @@ class Stats {
       // ignore
       return;
     }
-    account.stats.inc("post", blockHeight, this.globalStats);
+    this.inc("post", event, account);
     const post = new Post(account.accountId, blockHeight, data?.groupId);
     this.posts.set(post.postId, post);
+    account.posts.push(post);
 
     if (Object.keys(data?.image || {}).length > 0) {
-      account.stats.inc("post.image", blockHeight, this.globalStats);
+      this.inc("post.image", event, account);
     }
-    if (data?.text) {
-      account.stats.inc("post.text", blockHeight, this.globalStats);
+    if (isString(data?.text) && data.text.length > 0) {
+      this.inc("post.text", event, account);
+      this.incBy("post.text.length", data.text.length, event, account);
     }
     if (data?.groupId) {
-      account.stats.inc("post.group", blockHeight, this.globalStats);
+      this.inc("post.group", event, account);
     }
   }
 
-  processCommentEvent(event, account) {}
+  processCommentEvent(event, account) {
+    const blockHeight = event.b;
+    let data;
+    try {
+      data = JSON.parse(event.d);
+    } catch {
+      // ignore
+      return;
+    }
+    this.inc("comment", event, account);
+    const item = data?.item;
+    const comment = new Comment(account.accountId, blockHeight, item);
+    this.comments.set(comment.commentId, comment);
+    account.comments.push(comment);
+
+    if (Object.keys(data?.image || {}).length > 0) {
+      this.inc("comment.image", event, account);
+    }
+    if (isString(data?.comment) && data.comment.length > 0) {
+      this.inc("comment.text", event, account);
+      this.incBy("comment.text.length", data.text.length, event, account);
+    }
+
+    const post = this.posts.get(comment.itemId);
+    if (post) {
+      const receiver = this.getAccount(post.accountId);
+      this.inc("post.comments", event, receiver);
+      post.comments.push(comment);
+    }
+  }
 
   processSettingsEvent(event, account) {}
 
-  processIndexLikeEvent(event, account) {}
+  processIndexLikeEvent(event, account) {
+    const { key, value } = event.d;
+    if (!isObject(value) || !["like", "unlike"].includes(value?.type)) {
+      return;
+    }
+    const isLike = value?.type === "like";
+    const keyId = JSON.stringify(key);
+    const likes = this.likes.get(keyId) ?? new Set();
+    const hasLike = likes.has(account.accountId);
+    if ((isLike && hasLike) || (!isLike && !hasLike)) {
+      return;
+    }
+    if (isLike) {
+      likes.add(account.accountId);
+    } else {
+      likes.delete(account.accountId);
+    }
+    this.likes.set(keyId, likes);
+    this.inc(isLike ? "like" : "unlike", event, account);
+    const post = this.posts.get(keyId);
+    if (post) {
+      const receiver = this.getAccount(post.accountId);
+      this.inc(isLike ? "post.likes" : "post.unlikes", event, receiver);
+      this.inc(isLike ? "like.post" : "unlike.post", event, account);
+    }
+
+    const comment = this.comments.get(keyId);
+    if (comment) {
+      const receiver = this.getAccount(comment.accountId);
+      this.inc(isLike ? "comment.likes" : "comment.unlikes", event, receiver);
+      this.inc(isLike ? "like.comment" : "unlike.comment", event, account);
+    }
+  }
 
   processIndexNotifyEvent(event, account) {}
 
