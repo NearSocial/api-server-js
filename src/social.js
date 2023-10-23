@@ -334,8 +334,8 @@ const addIndexValue = ({
   }
 };
 
-const buildIndexForBlock = ({ data, indexObj, blockHeight, events }) => {
-  Object.entries(data).forEach(([accountId, account]) => {
+const buildIndexForBlock = ({ changes, indexObj, blockHeight, events }) => {
+  Object.entries(changes).forEach(([accountId, account]) => {
     const index = account?.index;
     if (isObject(index)) {
       Object.entries(index).forEach(([action, value]) => {
@@ -436,7 +436,7 @@ const extractChanges = (accountObject, path, b) => {
   return res;
 };
 
-const extractAllChanges = (accountObject, path) => {
+const extractAllChanges = (accountObject, path, requiredBlockHeight) => {
   const keys = keyToPath(path);
   let o = accountObject;
   let vs = null;
@@ -446,6 +446,13 @@ const extractAllChanges = (accountObject, path) => {
     }
     vs = o?.[key];
     o = getValuesObject(vs);
+  }
+
+  if (requiredBlockHeight) {
+    vs = vs?.slice(-1);
+    if (vs && vs.length > 0 && vs[0].b !== requiredBlockHeight) {
+      vs = null;
+    }
   }
 
   return (
@@ -465,7 +472,7 @@ const extractAllChanges = (accountObject, path) => {
 // - Comment created
 // - Settings modified
 // - Hide Edge created
-const buildEventsFromData = ({ data, events }) => {
+const buildEventsFromData = ({ data, events, requiredBlockHeight }) => {
   Object.entries(data).forEach(([accountId, accountValues]) => {
     const accountObject = getValuesObject(accountValues);
     if (!isObject(accountObject)) {
@@ -473,7 +480,7 @@ const buildEventsFromData = ({ data, events }) => {
     }
 
     EventDataPatterns.forEach(({ eventType, path, processing }) => {
-      extractAllChanges(accountObject, path).forEach(
+      extractAllChanges(accountObject, path, requiredBlockHeight).forEach(
         ({ blockHeight, changes }) => {
           switch (processing) {
             case EventProcessing.ObjectRequired:
@@ -540,9 +547,9 @@ const processStateData = ({ data, indexObj, events }) => {
   console.log("Total events:", events.length);
 };
 
-const processBlockData = ({ data, indexObj, blockHeight, events }) => {
-  // TODO extract events from data.
-  buildIndexForBlock({ data, indexObj, blockHeight, events });
+const processBlockData = ({ data, changes, indexObj, blockHeight, events }) => {
+  buildEventsFromData({ data, events, requiredBlockHeight: blockHeight });
+  buildIndexForBlock({ changes, indexObj, blockHeight, events });
 };
 
 module.exports = {

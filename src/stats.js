@@ -1,5 +1,5 @@
 const { EventType } = require("./events");
-const { isString, isObject } = require("./utils");
+const { isString, isObject, sortKeys } = require("./utils");
 
 class Post {
   constructor(accountId, blockHeight, groupId) {
@@ -84,14 +84,17 @@ class StatCounter {
     return value.index++;
   }
 
-  toString() {
-    const result = [];
-    for (const [key, value] of this.stats.entries()) {
-      result.push(
-        `${key}={index:${value.index}, value: ${value.value}, numBlocks:${value.blocks.length}}`
-      );
-    }
-    return result.join("\n");
+  toObject() {
+    return Object.fromEntries(
+      [...this.stats.entries()].map(([key, value]) => [
+        key,
+        {
+          index: value.index,
+          value: value.value,
+          numBlocks: value.blocks.length,
+        },
+      ])
+    );
   }
 }
 
@@ -138,6 +141,10 @@ class Stats {
     if (!this.accounts.has(accountId)) {
       this.accounts.set(accountId, new Account(accountId));
     }
+    return this.accounts.get(accountId);
+  }
+
+  getAccountOptional(accountId) {
     return this.accounts.get(accountId);
   }
 
@@ -358,6 +365,9 @@ class Stats {
     if (isString(data?.text) && data.text.length > 0) {
       this.inc("post.text", event, account);
       this.incBy("post.text.length", data.text.length, event, account);
+      if (data.text.includes("#BOS")) {
+        this.inc("post.bos", event, account);
+      }
     }
     if (data?.groupId) {
       this.inc("post.group", event, account);
@@ -535,6 +545,7 @@ class Stats {
   processIndexFlagEvent(event, account) {
     const { value: item } = event.d;
 
+    sortKeys(item);
     const itemId = JSON.stringify(item);
     const post = this.posts.get(itemId);
     if (post) {

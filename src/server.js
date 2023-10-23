@@ -68,14 +68,18 @@ const runServer = async () => {
   console.log("Computing stats...");
   stats.processEvents(events);
 
-  console.log(stats.accounts.get("mob.near").stats.toString());
-
   const oneBlockCache = new Map();
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
 
-  const addData = (data, blockHeight) => {
-    recursiveSet(state.data, data, blockHeight);
-    processBlockData({ data, indexObj, blockHeight, events });
+  const addData = (changes, blockHeight) => {
+    recursiveSet(state.data, changes, blockHeight);
+    processBlockData({
+      data: state.data,
+      changes,
+      indexObj,
+      blockHeight,
+      events,
+    });
     stats.processEvents(events);
   };
 
@@ -244,6 +248,11 @@ const runServer = async () => {
     return Array.isArray(blockHeight)
       ? blockHeight.map((bh) => blockTimestamps[parseInt(bh)] ?? null)
       : blockTimestamps[parseInt(blockHeight)] ?? null;
+  };
+
+  const getStats = (accountId) => {
+    const account = stats.getAccountOptional(accountId);
+    return account ? account.stats.toObject() : null;
   };
 
   scheduleUpdate(1);
@@ -416,6 +425,22 @@ const runServer = async () => {
       }
       console.log("POST /time", blockHeight);
       ctx.body = cachedJsonResult(stateTime, blockHeight);
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.get("/api/experimental/stats", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.query;
+      const accountId = body.accountId;
+      if (!accountId) {
+        throw new Error(`"accountId" is required`);
+      }
+      console.log("GET /api/experimental/stats", accountId);
+      ctx.body = cachedJsonResult(getStats, accountId);
     } catch (e) {
       ctx.status = 400;
       ctx.body = `${e}`;
