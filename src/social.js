@@ -530,16 +530,18 @@ const addEventFromIndex = ({
 };
 
 const processStateData = ({ data, indexObj, events }) => {
-  console.log("Building index...");
-  buildIndex({ data, indexObj, events });
   console.log("Building events...");
   buildEventsFromData({ data, events });
+  console.log("Building index...");
+  buildIndex({ data, indexObj, events });
   console.log("Sorting events...");
+  // Note we want data events to be first before processing index events.
   events.sort((a, b) => a.b - b.b);
   console.log("Total events:", events.length);
 };
 
 const processBlockData = ({ data, indexObj, blockHeight, events }) => {
+  // TODO extract events from data.
   buildIndexForBlock({ data, indexObj, blockHeight, events });
 };
 

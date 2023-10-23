@@ -9,6 +9,8 @@ class Post {
     this.postId = Post.makeId(accountId, blockHeight);
     this.comments = [];
     this.reposts = new Set();
+    this.hashtags = new Set();
+    this.flaggedBy = new Set();
   }
 
   static makeId(accountId, blockHeight) {
@@ -27,7 +29,8 @@ class Comment {
     this.item = item;
     this.itemId = JSON.stringify(item);
     this.commentId = Comment.makeId(accountId, blockHeight);
-    this.likes = new Set();
+    this.hashtags = new Set();
+    this.flaggedBy = new Set();
   }
 
   static makeId(accountId, blockHeight) {
@@ -118,6 +121,8 @@ class Stats {
 
     this.posts = new Map();
     this.comments = new Map();
+    this.hashtagPosts = new Map();
+    this.hashtagComments = new Map();
     this.eventsCount = 0;
 
     this.globalStats = new StatCounter();
@@ -381,16 +386,11 @@ class Stats {
       this.inc("comment.text", event, account);
       this.incBy("comment.text.length", data.text.length, event, account);
     }
-
-    const post = this.posts.get(comment.itemId);
-    if (post) {
-      const receiver = this.getAccount(post.accountId);
-      this.inc("post.comments", event, receiver);
-      post.comments.push(comment);
-    }
   }
 
-  processSettingsEvent(event, account) {}
+  processSettingsEvent(event, account) {
+    // Ignore for now
+  }
 
   processIndexLikeEvent(event, account) {
     const { key, value } = event.d;
@@ -416,6 +416,7 @@ class Stats {
       const receiver = this.getAccount(post.accountId);
       this.inc(isLike ? "post.likes" : "post.unlikes", event, receiver);
       this.inc(isLike ? "like.post" : "unlike.post", event, account);
+      return;
     }
 
     const comment = this.comments.get(keyId);
@@ -426,19 +427,140 @@ class Stats {
     }
   }
 
-  processIndexNotifyEvent(event, account) {}
+  processIndexNotifyEvent(event, account) {
+    const { key: receiverId, value } = event.d;
+    const receiver = this.getAccount(receiverId);
+    this.inc("notify", event, account);
+    this.inc("notification", event, receiver);
+    if (!isObject(value)) {
+      return;
+    }
 
-  processIndexPostEvent(event, account) {}
+    if (
+      [
+        "mention",
+        "follow",
+        "unfollow",
+        "poke",
+        "like",
+        "comment",
+        "repost",
+      ].includes(value?.type)
+    ) {
+      this.inc(`notify.${value.type}`, event, account);
+      this.inc(`notification.${value.type}`, event, receiver);
+    }
+  }
 
-  processIndexCommentEvent(event, account) {}
+  processIndexPostEvent(event, account) {
+    // ignore feed
+  }
 
-  processIndexHashtagEvent(event, account) {}
+  processIndexCommentEvent(event, account) {
+    const { key } = event.d;
 
-  processIndexTosAcceptEvent(event, account) {}
+    const keyId = JSON.stringify(key);
 
-  processIndexRepostEvent(event, account) {}
+    const commentId = Comment.makeId(event.a, event.b);
+    const comment = this.comments.get(commentId);
+    const post = this.posts.get(keyId);
+    if (post && comment && comment.itemId === post.postId) {
+      const receiver = this.getAccount(post.accountId);
+      this.inc("post.comments", event, receiver);
+      post.comments.push(comment);
+    }
+  }
 
-  processIndexFlagEvent(event, account) {}
+  processIndexHashtagEvent(event, account) {
+    const { key: hashtag, value } = event.d;
+
+    if (
+      !isObject(value) ||
+      value.type !== "social" ||
+      !isString(value.path) ||
+      !value.path.startsWith(`${account.accountId}/`)
+    ) {
+      return;
+    }
+
+    const item = {
+      blockHeight: event.b,
+      path: value.path,
+      type: value.type,
+    };
+    const itemId = JSON.stringify(item);
+
+    const post = this.posts.get(itemId);
+    if (post) {
+      this.inc("post.hashtag", event, account);
+      post.hashtags.add(hashtag);
+      const posts = this.hashtagPosts.get(hashtag) ?? new Set();
+      posts.add(post);
+      this.hashtagPosts.set(hashtag, posts);
+      return;
+    }
+
+    const comment = this.comments.get(itemId);
+    if (comment) {
+      this.inc("comment.hashtag", event, account);
+      comment.hashtags.add(hashtag);
+      const comments = this.hashtagComments.get(hashtag) ?? new Set();
+      comments.add(comment);
+      this.hashtagComments.set(hashtag, comments);
+    }
+  }
+
+  processIndexTosAcceptEvent(event, account) {
+    this.inc("tosAccept", event, account);
+  }
+
+  processIndexRepostEvent(event, account) {
+    // Only processing reposts of posts, not the repost feed.
+    const { key } = event.d;
+    const keyId = JSON.stringify(key);
+    const post = this.posts.get(keyId);
+    if (!post) {
+      return;
+    }
+
+    this.inc("repost", event, account);
+    if (!post.reposts.has(account.accountId)) {
+      post.reposts.add(account.accountId);
+
+      const receiver = this.getAccount(post.accountId);
+      this.inc("post.repost", event, receiver);
+    }
+  }
+
+  processIndexFlagEvent(event, account) {
+    const { value: item } = event.d;
+
+    const itemId = JSON.stringify(item);
+    const post = this.posts.get(itemId);
+    if (post) {
+      if (post.flaggedBy.has(account.accountId)) {
+        return;
+      }
+      this.inc("flag", event, account);
+      this.inc("flag.post", event, account);
+      post.flaggedBy.add(account.accountId);
+      const receiver = this.getAccount(post.accountId);
+      this.inc("post.flagged", event, receiver);
+      return;
+    }
+
+    const comment = this.comments.get(itemId);
+    if (comment) {
+      if (comment.flaggedBy.has(account.accountId)) {
+        return;
+      }
+      this.inc("flag", event, account);
+      this.inc("flag.comment", event, account);
+      comment.flaggedBy.add(account.accountId);
+      const receiver = this.getAccount(comment.accountId);
+      this.inc("comment.flagged", event, receiver);
+    }
+  }
 }
 
 module.exports = { Stats };
