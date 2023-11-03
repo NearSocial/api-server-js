@@ -251,8 +251,23 @@ const runServer = async () => {
   };
 
   const getStats = (accountId) => {
-    const account = stats.getAccountOptional(accountId);
-    return account ? account.stats.toObject() : null;
+    const isArray = Array.isArray(accountId);
+    const result = (isArray ? accountId : [accountId]).map((accountId) => {
+      const account = stats.getAccountOptional(accountId);
+      return account ? account.stats.toObject() : null;
+    });
+    return isArray ? result : result[0];
+  };
+
+  const getLikes = (item) => {
+    const isArray = Array.isArray(item);
+    const result = (isArray ? item : [item]).map((item) => {
+      sortKeys(item);
+      const itemId = JSON.stringify(item);
+      const likes = stats.likes.get(itemId);
+      return likes ? [...likes.keys()] : [];
+    });
+    return isArray ? result : result[0];
   };
 
   scheduleUpdate(1);
@@ -431,16 +446,32 @@ const runServer = async () => {
     }
   });
 
-  router.get("/api/experimental/stats", (ctx) => {
+  router.post("/api/experimental/stats/account", (ctx) => {
     ctx.type = "application/json; charset=utf-8";
     try {
-      const body = ctx.request.query;
+      const body = ctx.request.body;
       const accountId = body.accountId;
       if (!accountId) {
         throw new Error(`"accountId" is required`);
       }
-      console.log("GET /api/experimental/stats", accountId);
+      console.log("POST /api/experimental/stats/account", accountId);
       ctx.body = cachedJsonResult(getStats, accountId);
+    } catch (e) {
+      ctx.status = 400;
+      ctx.body = `${e}`;
+    }
+  });
+
+  router.post("/api/experimental/likes", (ctx) => {
+    ctx.type = "application/json; charset=utf-8";
+    try {
+      const body = ctx.request.body;
+      const item = body.item;
+      if (!item) {
+        throw new Error(`"accountId" is required`);
+      }
+      console.log("POST /api/experimental/likes", item);
+      ctx.body = cachedJsonResult(getLikes, item);
     } catch (e) {
       ctx.status = 400;
       ctx.body = `${e}`;
