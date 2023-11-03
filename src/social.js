@@ -226,7 +226,7 @@ const recursiveKeys = (res, obj, keys, b, options) => {
       ? [[matchKey, obj[matchKey]]]
       : [];
   entries.forEach(([key, values]) => {
-    const o = getValuesObject(values, b);
+    const [o, v] = getValuesObject(values, b);
     if (keys.length === 1) {
       if (o || isString(v?.s) || (options.returnDeleted && v?.s === null)) {
         if (o && options.valuesOnly) {
@@ -368,13 +368,13 @@ const buildIndexForBlock = ({ changes, indexObj, blockHeight, events }) => {
 
 const buildIndex = ({ data, indexObj, events }) => {
   Object.entries(data).forEach(([accountId, accountValues]) => {
-    let o = getValuesObject(accountValues);
+    let [o] = getValuesObject(accountValues);
 
     const indexValues = o?.index;
     if (!indexValues) {
       return;
     }
-    o = getValuesObject(indexValues);
+    [o] = getValuesObject(indexValues);
     if (!isObject(o)) {
       return;
     }
@@ -416,7 +416,7 @@ const buildIndex = ({ data, indexObj, events }) => {
 
 const getValuesObject = (values, b) => {
   const v = findValueAtBlockHeight(values, b);
-  return v?.o ?? (v?.i !== undefined ? values[v.i].o : null);
+  return [v?.o ?? (v?.i !== undefined ? values[v.i].o : null), v];
 };
 
 // Extracts changes from the account object for a given path.
@@ -445,7 +445,7 @@ const extractAllChanges = (accountObject, path, requiredBlockHeight) => {
       break;
     }
     vs = o?.[key];
-    o = getValuesObject(vs);
+    [o] = getValuesObject(vs);
   }
 
   if (requiredBlockHeight) {
@@ -474,7 +474,7 @@ const extractAllChanges = (accountObject, path, requiredBlockHeight) => {
 // - Hide Edge created
 const buildEventsFromData = ({ data, events, requiredBlockHeight }) => {
   Object.entries(data).forEach(([accountId, accountValues]) => {
-    const accountObject = getValuesObject(accountValues);
+    const [accountObject] = getValuesObject(accountValues);
     if (!isObject(accountObject)) {
       return;
     }
