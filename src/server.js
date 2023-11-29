@@ -63,27 +63,25 @@ const runServer = async () => {
   const events = [];
   const stats = new Stats(blockTimestamps);
 
-  console.log("Processing state data...");
-  processStateData({ data: state.data, indexObj, events });
-  console.log("Computing stats...");
-  stats.processEvents(events);
-
+  console.log("Catching up with receipts...");
   const oneBlockCache = new Map();
   const receiptFetcher = await Receipts.init(state?.lastReceipt);
 
-  const addData = (changes, blockHeight) => {
+  const addData = (changes, blockHeight, skipProcessing) => {
     recursiveSet(state.data, changes, blockHeight);
-    processBlockData({
-      data: state.data,
-      changes,
-      indexObj,
-      blockHeight,
-      events,
-    });
-    stats.processEvents(events);
+    if (!skipProcessing) {
+      processBlockData({
+        data: state.data,
+        changes,
+        indexObj,
+        blockHeight,
+        events,
+      });
+      stats.processEvents(events);
+    }
   };
 
-  const applyReceipts = (receipts) => {
+  const applyReceipts = (receipts, skipProcessing) => {
     if (receipts.length === 0) {
       return;
     }
@@ -96,14 +94,14 @@ const runServer = async () => {
       );
       if (receiptBlockHeight > blockHeight) {
         if (blockHeight) {
-          addData(aggregatedData, blockHeight);
+          addData(aggregatedData, blockHeight, skipProcessing);
           aggregatedData = {};
         }
         blockHeight = receiptBlockHeight;
       }
       mergeData(aggregatedData, receipt.args.data);
     });
-    addData(aggregatedData, blockHeight);
+    addData(aggregatedData, blockHeight, skipProcessing);
   };
 
   const fetchAllReceipts = async () => {
@@ -118,11 +116,11 @@ const runServer = async () => {
     return allReceipts;
   };
 
-  const fetchAndApply = async () => {
+  const fetchAndApply = async (skipProcessing) => {
     const newReceipts = await fetchAllReceipts();
     if (newReceipts.length) {
       console.log(`Fetched ${newReceipts.length} receipts.`);
-      applyReceipts(newReceipts);
+      applyReceipts(newReceipts, skipProcessing);
       oneBlockCache.forEach((value) => value.clear());
       oneBlockCache.clear();
     }
@@ -130,7 +128,13 @@ const runServer = async () => {
   };
 
   console.log("Catching up...");
-  await fetchAndApply();
+  await fetchAndApply(true);
+
+  console.log("Processing state data...");
+  processStateData({ data: state.data, indexObj, events });
+  console.log("Computing stats...");
+  stats.processEvents(events);
+
   saveState(state, NewStateFilename);
 
   const scheduleUpdate = (delay) =>
