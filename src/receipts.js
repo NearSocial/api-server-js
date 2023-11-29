@@ -9,16 +9,22 @@ const StatusSuccess = "SUCCESS";
 
 const Receipts = {
   init: async function (lastReceipt) {
+    this.lastReceipt = lastReceipt ?? { blockHeight: 0, outcomeIndex: 0 };
+    if (!process.env.DATABASE_URL) {
+      return this;
+    }
     const client = new Client({
       connectionString: process.env.DATABASE_URL,
     });
     await client.connect();
     this.client = client;
-    this.lastReceipt = lastReceipt ?? { blockHeight: 0, outcomeIndex: 0 };
     return this;
   },
 
   fetchReceipts: async function () {
+    if (!this.client) {
+      return [];
+    }
     const res = await this.client.query(
       `SELECT * from receipts where
         (block_height > $1 or (block_height = $1 and outcome_index > $2))
